@@ -528,6 +528,30 @@ public class DownloadInfo {
         pw.decreaseIndent();
     }
 
+    public void logDump() {
+        Log.v(Constants.TAG, "mId" + mId);
+        Log.v(Constants.TAG, "mLastMod: " + mLastMod);
+        Log.v(Constants.TAG, "mPackage: " + mPackage);
+        Log.v(Constants.TAG, "mUid: " + mUid);
+        Log.v(Constants.TAG, "mUri: " + mUri);
+        Log.v(Constants.TAG, "mMimeType: " + mMimeType);
+        Log.v(Constants.TAG, "mCookies: " + (mCookies != null ? "yes" : "no"));
+        Log.v(Constants.TAG, "mReferer: " + (mReferer != null ? "yes" : "no"));
+        Log.v(Constants.TAG, "mUserAgent: " + mUserAgent);
+        Log.v(Constants.TAG, "mFileName: " + mFileName);
+        Log.v(Constants.TAG, "mDestination: " + mDestination);
+        Log.v(Constants.TAG, "mStatus: " + Downloads.Impl.statusToString(mStatus));
+        Log.v(Constants.TAG, "mCurrentBytes: " + mCurrentBytes);
+        Log.v(Constants.TAG, "mTotalBytes: " + mTotalBytes);
+        Log.v(Constants.TAG, "mNumFailed: " + mNumFailed);
+        Log.v(Constants.TAG, "mRetryAfter: " + mRetryAfter);
+        Log.v(Constants.TAG, "mETag: " + mETag);
+        Log.v(Constants.TAG, "mIsPublicApi: " + mIsPublicApi);
+        Log.v(Constants.TAG, "mAllowedNetworkTypes: " + mAllowedNetworkTypes);
+        Log.v(Constants.TAG, "mAllowRoaming: " + mAllowRoaming);
+        Log.v(Constants.TAG, "mAllowMetered: " + mAllowMetered);
+    }
+
     /**
      * Returns the amount of time (as measured from the "now" parameter)
      * at which a download will be active.

@@ -141,6 +141,14 @@
     <string name="notification_download_complete">Download complete.</string>
 
     <!-- When a download completes, a notification is displayed, and this
+        string is used to indicate that the download successfully completed.
+        This version will include the filename.
+        Note that such a download could have been initiated by a variety of
+        applications, including (but not limited to) the browser, an email
+        application, a content marketplace. -->
+    <string name="notification_download_complete_w_filename">Complete:</string>
+
+    <!-- When a download completes, a notification is displayed, and this
         string is used to indicate that the download failed.
         Note that such a download could have been initiated by a variety of
         applications, including (but not limited to) the browser, an email

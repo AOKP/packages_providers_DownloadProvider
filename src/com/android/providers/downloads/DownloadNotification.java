@@ -47,6 +47,7 @@ class DownloadNotification {
     private SparseLongArray mFirstShown = new SparseLongArray();
 
     static final String LOGTAG = "DownloadNotification";
+    static final boolean DEBUG = false;
     static final String WHERE_RUNNING =
         "(" + Downloads.Impl.COLUMN_STATUS + " >= '100') AND (" +
         Downloads.Impl.COLUMN_STATUS + " <= '199') AND (" +
@@ -218,12 +219,21 @@ class DownloadNotification {
             if (!isCompleteAndVisible(download)) {
                 continue;
             }
+            if (DEBUG) download.logDump();
             notificationForCompletedDownload(download.mId, download.mTitle,
-                    download.mStatus, download.mDestination, download.mLastMod);
+                    download.mStatus, download.mDestination, download.mLastMod,
+                    download.mFileName);
         }
     }
+
     void notificationForCompletedDownload(long id, String title, int status,
             int destination, long lastMod) {
+        notificationForCompletedDownload(id, title, status,
+                destination, lastMod, null);
+    }
+
+    void notificationForCompletedDownload(long id, String title, int status,
+            int destination, long lastMod, String filename) {
         // Add the notifications
         Notification.Builder builder = new Notification.Builder(mContext);
         builder.setSmallIcon(android.R.drawable.stat_sys_download_done);
@@ -235,13 +245,20 @@ class DownloadNotification {
             ContentUris.withAppendedId(Downloads.Impl.ALL_DOWNLOADS_CONTENT_URI, id);
         String caption;
         Intent intent;
+
         if (Downloads.Impl.isStatusError(status)) {
             caption = mContext.getResources()
                     .getString(R.string.notification_download_failed);
             intent = new Intent(Constants.ACTION_LIST);
         } else {
-            caption = mContext.getResources()
-                    .getString(R.string.notification_download_complete);
+            if (filename != null) {
+                caption = mContext.getResources()
+                        .getString(R.string.notification_download_complete_w_filename)
+                        + ' ' + filename;
+            } else {
+                caption = mContext.getResources()
+                        .getString(R.string.notification_download_complete);
+            }
             if (destination != Downloads.Impl.DESTINATION_SYSTEMCACHE_PARTITION) {
                 intent = new Intent(Constants.ACTION_OPEN);
             } else {
