@@ -1,0 +1,9 @@
+Change-Id: I8f8b92b8bb41f18a0fa028e1edf39f9d67bee6ac
+Code-Review+2: Khas Mek <boushh@gmail.com>
+Verified+1: Khas Mek <boushh@gmail.com>
+Code-Review+1: Jon Stanford <jbirdvegas@gmail.com>
+Submitted-by: Khas Mek <boushh@gmail.com>
+Submitted-at: Sun, 06 Jan 2013 20:27:03 +0000
+Reviewed-on: http://gerrit.sudoservers.com/4931
+Project: AOKP/packages_providers_DownloadProvider
+Branch: refs/heads/jb-mr1
