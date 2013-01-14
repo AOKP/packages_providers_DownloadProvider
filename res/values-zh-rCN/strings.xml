@@ -36,6 +36,7 @@
     <string name="notification_filename_separator" msgid="7147189522857807618">", "</string>
     <string name="notification_filename_extras" msgid="5549729917695688191">" 还有 <xliff:g id="NUMBER">%d</xliff:g> 项"</string>
     <string name="notification_download_complete" msgid="5443563299253103667">"下载已完成。"</string>
+    <string name="notification_download_complete_w_filename">完成：</string>
     <string name="notification_download_failed" msgid="8612136111952014978">"下载失败。"</string>
     <string name="notification_need_wifi_for_size" msgid="2556172885154833575">"文件过大，需要通过 Wi-Fi 下载。"</string>
     <string name="notification_paused_in_background" msgid="4328508073283591772">"已在后台暂停。"</string>
