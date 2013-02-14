@@ -33,8 +33,6 @@
     <string name="permlab_accessAllDownloads" msgid="2436240495424393717">"Accesaţi toate descărcările din sistem"</string>
     <string name="permdesc_accessAllDownloads" msgid="1871832254578267128">"Permite aplicaţiei să vizualizeze şi să modifice toate descărcările iniţiate de orice aplicaţie din sistem."</string>
     <string name="download_unknown_title" msgid="7015124071247271585">"&lt;Fără titlu&gt;"</string>
-    <string name="notification_filename_separator" msgid="7147189522857807618">", "</string>
-    <string name="notification_filename_extras" msgid="5549729917695688191">" şi încă <xliff:g id="NUMBER">%d</xliff:g>"</string>
     <string name="notification_download_complete" msgid="5443563299253103667">"Descărcare finalizată."</string>
     <string name="notification_download_failed" msgid="8612136111952014978">"Descărcare nereuşită."</string>
     <string name="notification_need_wifi_for_size" msgid="2556172885154833575">"Dimen. desc. nec. Wi-Fi"</string>
@@ -47,4 +45,14 @@
     <string name="button_cancel_download" msgid="2430166148737975604">"Anulaţi"</string>
     <string name="button_start_now" msgid="792123674007840864">"Începeţi acum"</string>
     <string name="download_percent" msgid="6889426633242976698">"<xliff:g id="NUMBER">%d</xliff:g> <xliff:g id="PERCENT">%%</xliff:g>"</string>
+  <plurals name="notif_summary_active">
+    <item quantity="one" msgid="8475775855911967027">"Se descarcă un fişier"</item>
+    <item quantity="other" msgid="9087228371320573153">"Se descarcă <xliff:g id="NUMBER">%d</xliff:g> (de) fişiere"</item>
+  </plurals>
+  <plurals name="notif_summary_waiting">
+    <item quantity="one" msgid="5537481763963544278">"Un fişier în aşteptare"</item>
+    <item quantity="other" msgid="549229034166062887">"<xliff:g id="NUMBER">%d</xliff:g> (de) fişiere în aşteptare"</item>
+  </plurals>
+    <string name="download_remaining" msgid="3139295890887972718">"Timp rămas: <xliff:g id="DURATION">%s</xliff:g>"</string>
+    <string name="download_no_application_title" msgid="7935659741162801699">"Fişierul nu poate fi deschis"</string>
 </resources>
