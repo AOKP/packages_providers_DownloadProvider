@@ -71,12 +71,6 @@ class StorageManager {
      */
     private final File mDownloadDataDir;
 
-    /** the Singleton instance of this class.
-     * TODO: once DownloadService is refactored into a long-living object, there is no need
-     * for this Singleton'ing.
-     */
-    private static StorageManager sSingleton = null;
-
     /** how often do we need to perform checks on space to make sure space is available */
     private static final int FREQUENCY_OF_CHECKS_ON_SPACE_AVAILABILITY = 1024 * 1024; // 1MB
     private int mBytesDownloadedSinceLastCheckOnSpace = 0;
@@ -84,19 +78,9 @@ class StorageManager {
     /** misc members */
     private final Context mContext;
 
-    /**
-     * maintains Singleton instance of this class
-     */
-    synchronized static StorageManager getInstance(Context context) {
-        if (sSingleton == null) {
-            sSingleton = new StorageManager(context);
-        }
-        return sSingleton;
-    }
-
-    private StorageManager(Context context) { // constructor is private
+    public StorageManager(Context context) {
         mContext = context;
-        mDownloadDataDir = context.getCacheDir();
+        mDownloadDataDir = getDownloadDataDirectory(context);
         mExternalStorageDir = Environment.getExternalStorageDirectory();
         mSystemCacheDir = Environment.getDownloadCacheDirectory();
         startThreadToCleanupDatabaseAndPurgeFileSystem();
@@ -308,6 +292,10 @@ class StorageManager {
         return mDownloadDataDir;
     }
 
+    public static File getDownloadDataDirectory(Context context) {
+        return context.getCacheDir();
+    }
+
     /**
      * Deletes purgeable files from the cache partition. This also deletes
      * the matching database entries. Files are deleted in LRU order until
@@ -370,7 +358,7 @@ class StorageManager {
      * This is not a very common occurrence. So, do this only once in a while.
      */
     private void removeSpuriousFiles() {
-        if (true || Constants.LOGV) {
+        if (Constants.LOGV) {
             Log.i(Constants.TAG, "in removeSpuriousFiles");
         }
         // get a list of all files in system cache dir and downloads data dir

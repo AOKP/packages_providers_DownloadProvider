@@ -16,13 +16,23 @@
 
 package com.android.providers.downloads;
 
-import static com.google.testing.littlemock.LittleMock.anyInt;
-import static com.google.testing.littlemock.LittleMock.anyString;
-import static com.google.testing.littlemock.LittleMock.atLeastOnce;
-import static com.google.testing.littlemock.LittleMock.isA;
-import static com.google.testing.littlemock.LittleMock.never;
-import static com.google.testing.littlemock.LittleMock.times;
-import static com.google.testing.littlemock.LittleMock.verify;
+import static android.app.DownloadManager.STATUS_FAILED;
+import static android.app.DownloadManager.STATUS_PAUSED;
+import static android.net.TrafficStats.GB_IN_BYTES;
+import static android.text.format.DateUtils.SECOND_IN_MILLIS;
+import static java.net.HttpURLConnection.HTTP_MOVED_TEMP;
+import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
+import static java.net.HttpURLConnection.HTTP_OK;
+import static java.net.HttpURLConnection.HTTP_PARTIAL;
+import static java.net.HttpURLConnection.HTTP_PRECON_FAILED;
+import static java.net.HttpURLConnection.HTTP_UNAVAILABLE;
+import static org.mockito.Matchers.anyInt;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Matchers.isA;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import android.app.DownloadManager;
 import android.app.Notification;
@@ -33,20 +43,24 @@ import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.provider.Downloads;
 import android.test.suitebuilder.annotation.LargeTest;
+import android.test.suitebuilder.annotation.Suppress;
+import android.text.format.DateUtils;
 
 import com.google.mockwebserver.MockResponse;
+import com.google.mockwebserver.MockStreamResponse;
 import com.google.mockwebserver.RecordedRequest;
+import com.google.mockwebserver.SocketPolicy;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.MalformedURLException;
 import java.util.List;
-
+import java.util.concurrent.TimeoutException;
 
 @LargeTest
 public class PublicApiFunctionalTest extends AbstractPublicApiTest {
@@ -76,7 +90,6 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
         } else {
             mTestDirectory.mkdir();
         }
-        mSystemFacade.setStartThreadsWithoutWaiting(false);
     }
 
     @Override
@@ -120,6 +133,24 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
                      download.getLongField(DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP));
 
         checkCompleteDownload(download);
+    }
+
+    @Suppress
+    public void testExtremelyLarge() throws Exception {
+        // NOTE: suppressed since this takes several minutes to run
+        final long length = 3 * GB_IN_BYTES;
+        final InputStream body = new FakeInputStream(length);
+
+        enqueueResponse(new MockStreamResponse().setResponseCode(HTTP_OK).setBody(body, length)
+                .setHeader("Content-type", "text/plain")
+                .setSocketPolicy(SocketPolicy.DISCONNECT_AT_END));
+
+        final Download download = enqueueRequest(getRequest()
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "extreme.bin"));
+        download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL, 10 * DateUtils.MINUTE_IN_MILLIS);
+
+        assertEquals(length, download.getLongField(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+        assertEquals(length, download.getLongField(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
     }
 
     private void checkUriContent(Uri uri) throws FileNotFoundException, IOException {
@@ -191,7 +222,7 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
     private MockResponse buildPartialResponse(int start, int end) {
         int totalLength = FILE_CONTENT.length();
         boolean isFirstResponse = (start == 0);
-        int status = isFirstResponse ? HTTP_OK : HTTP_PARTIAL_CONTENT;
+        int status = isFirstResponse ? HTTP_OK : HTTP_PARTIAL;
         MockResponse response = buildResponse(status, FILE_CONTENT.substring(start, end))
                 .setHeader("Content-length", totalLength)
                 .setHeader("Etag", ETAG);
@@ -385,9 +416,70 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
         assertEquals(REQUEST_PATH, lastRequest.getPath());
     }
 
+    public void testRunawayRedirect() throws Exception {
+        for (int i = 0; i < 16; i++) {
+            enqueueResponse(buildEmptyResponse(HTTP_MOVED_TEMP)
+                    .setHeader("Location", mServer.getUrl("/" + i).toString()));
+        }
+
+        final Download download = enqueueRequest(getRequest());
+
+        // Ensure that we arrive at failed download, instead of spinning forever
+        download.runUntilStatus(DownloadManager.STATUS_FAILED);
+        assertEquals(DownloadManager.ERROR_TOO_MANY_REDIRECTS, download.getReason());
+    }
+
+    public void testRunawayUnavailable() throws Exception {
+        final int RETRY_DELAY = 120;
+        for (int i = 0; i < 16; i++) {
+            enqueueResponse(
+                    buildEmptyResponse(HTTP_UNAVAILABLE).setHeader("Retry-after", RETRY_DELAY));
+        }
+
+        final Download download = enqueueRequest(getRequest());
+        for (int i = 0; i < Constants.MAX_RETRIES - 1; i++) {
+            download.runUntilStatus(DownloadManager.STATUS_PAUSED);
+            mSystemFacade.incrementTimeMillis((RETRY_DELAY + 60) * SECOND_IN_MILLIS);
+        }
+
+        // Ensure that we arrive at failed download, instead of spinning forever
+        download.runUntilStatus(DownloadManager.STATUS_FAILED);
+    }
+
     public void testNoEtag() throws Exception {
         enqueueResponse(buildPartialResponse(0, 5).removeHeader("Etag"));
         runSimpleFailureTest(DownloadManager.ERROR_CANNOT_RESUME);
+    }
+
+    public void testEtagChanged() throws Exception {
+        final String A = "kittenz";
+        final String B = "puppiez";
+
+        // 1. Try downloading A, but partial result
+        enqueueResponse(buildResponse(HTTP_OK, A.substring(0, 2))
+                .setHeader("Content-length", A.length())
+                .setHeader("Etag", A));
+
+        // 2. Try resuming A, but fail ETag check
+        enqueueResponse(buildEmptyResponse(HTTP_PRECON_FAILED));
+
+        final Download download = enqueueRequest(getRequest());
+        RecordedRequest req;
+
+        // 1. Try downloading A, but partial result
+        download.runUntilStatus(STATUS_PAUSED);
+        assertEquals(DownloadManager.PAUSED_WAITING_TO_RETRY, download.getReason());
+        req = takeRequest();
+        assertNull(getHeaderValue(req, "Range"));
+        assertNull(getHeaderValue(req, "If-Match"));
+
+        // 2. Try resuming A, but fail ETag check
+        mSystemFacade.incrementTimeMillis(RETRY_DELAY_MILLIS);
+        download.runUntilStatus(STATUS_FAILED);
+        assertEquals(HTTP_PRECON_FAILED, download.getReason());
+        req = takeRequest();
+        assertEquals("bytes=2-", getHeaderValue(req, "Range"));
+        assertEquals(A, getHeaderValue(req, "If-Match"));
     }
 
     public void testSanitizeMediaType() throws Exception {
@@ -400,7 +492,7 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
 
     public void testNoContentLength() throws Exception {
         enqueueResponse(buildEmptyResponse(HTTP_OK).removeHeader("Content-length"));
-        runSimpleFailureTest(DownloadManager.ERROR_HTTP_DATA_ERROR);
+        runSimpleFailureTest(DownloadManager.ERROR_CANNOT_RESUME);
     }
 
     public void testInsufficientSpace() throws Exception {
@@ -412,22 +504,24 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
     }
 
     public void testCancel() throws Exception {
-        mSystemFacade.setStartThreadsWithoutWaiting(true);
         // return 'real time' from FakeSystemFacade so that DownloadThread will report progress
         mSystemFacade.setReturnActualTime(true);
         enqueueResponse(buildContinuingResponse());
         Download download = enqueueRequest(getRequest());
-        startService(null);
         // give the download time to get started and progress to 1% completion
         // before cancelling it.
         boolean rslt = download.runUntilProgress(1);
         assertTrue(rslt);
         mManager.remove(download.mId);
-        startService(null);
-        int status = download.runUntilDone();
-        // make sure the row is gone from the database
-        assertEquals(-1, status);
-        mSystemFacade.setReturnActualTime(false);
+
+        // Verify that row is removed from database
+        final long timeout = SystemClock.elapsedRealtime() + (15 * SECOND_IN_MILLIS);
+        while (download.getStatusIfExists() != -1) {
+            if (SystemClock.elapsedRealtime() > timeout) {
+                throw new TimeoutException("Row wasn't removed");
+            }
+            SystemClock.sleep(100);
+        }
     }
 
     public void testDownloadCompleteBroadcast() throws Exception {
@@ -512,9 +606,9 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
 
     public void testContentObserver() throws Exception {
         enqueueResponse(buildEmptyResponse(HTTP_OK));
-        enqueueRequest(getRequest());
         mResolver.resetNotified();
-        runService();
+        final Download download = enqueueRequest(getRequest());
+        download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
         assertTrue(mResolver.mNotifyWasCalled);
     }
 
@@ -524,10 +618,9 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
         final Download download = enqueueRequest(
                 getRequest().setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN));
         download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
-        runService();
 
+        verify(mNotifManager, times(1)).cancelAll();
         verify(mNotifManager, never()).notify(anyString(), anyInt(), isA(Notification.class));
-        // TODO: verify that it never cancels
     }
 
     public void testNotificationVisible() throws Exception {
@@ -536,11 +629,10 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
         // only shows in-progress notifications
         final Download download = enqueueRequest(getRequest());
         download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
-        runService();
 
         // TODO: verify different notif types with tags
+        verify(mNotifManager, times(1)).cancelAll();
         verify(mNotifManager, atLeastOnce()).notify(anyString(), anyInt(), isA(Notification.class));
-        verify(mNotifManager, times(1)).cancel(anyString(), anyInt());
     }
 
     public void testNotificationVisibleComplete() throws Exception {
@@ -549,17 +641,16 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
         final Download download = enqueueRequest(getRequest().setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED));
         download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
-        runService();
 
         // TODO: verify different notif types with tags
+        verify(mNotifManager, times(1)).cancelAll();
         verify(mNotifManager, atLeastOnce()).notify(anyString(), anyInt(), isA(Notification.class));
-        verify(mNotifManager, times(1)).cancel(anyString(), anyInt());
     }
 
     public void testRetryAfter() throws Exception {
         final int delay = 120;
         enqueueResponse(
-                buildEmptyResponse(HTTP_SERVICE_UNAVAILABLE).setHeader("Retry-after", delay));
+                buildEmptyResponse(HTTP_UNAVAILABLE).setHeader("Retry-after", delay));
         enqueueResponse(buildEmptyResponse(HTTP_OK));
 
         Download download = enqueueRequest(getRequest());
@@ -643,19 +734,32 @@ public class PublicApiFunctionalTest extends AbstractPublicApiTest {
      * 3) Resume request to complete download
      * @return the last request sent to the server, resuming after the interruption
      */
-    private RecordedRequest runRedirectionTest(int status)
-            throws MalformedURLException, Exception {
+    private RecordedRequest runRedirectionTest(int status) throws Exception {
         enqueueResponse(buildEmptyResponse(status)
                 .setHeader("Location", mServer.getUrl(REDIRECTED_PATH).toString()));
         enqueueInterruptedDownloadResponses(5);
 
-        Download download = enqueueRequest(getRequest());
-        runService();
+        final Download download = enqueueRequest(getRequest());
+        download.runUntilStatus(DownloadManager.STATUS_PAUSED);
+        mSystemFacade.incrementTimeMillis(RETRY_DELAY_MILLIS);
+        download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
+
         assertEquals(REQUEST_PATH, takeRequest().getPath());
         assertEquals(REDIRECTED_PATH, takeRequest().getPath());
 
-        mSystemFacade.incrementTimeMillis(RETRY_DELAY_MILLIS);
-        download.runUntilStatus(DownloadManager.STATUS_SUCCESSFUL);
         return takeRequest();
+    }
+
+    /**
+     * Return value of requested HTTP header, if it exists.
+     */
+    private static String getHeaderValue(RecordedRequest req, String header) {
+        header = header.toLowerCase() + ":";
+        for (String h : req.getHeaders()) {
+            if (h.toLowerCase().startsWith(header)) {
+                return h.substring(header.length()).trim();
+            }
+        }
+        return null;
     }
 }

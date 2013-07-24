@@ -16,16 +16,33 @@
 
 package com.android.providers.downloads;
 
+import static android.provider.Downloads.Impl.STATUS_BAD_REQUEST;
+import static android.provider.Downloads.Impl.STATUS_CANNOT_RESUME;
+import static android.provider.Downloads.Impl.STATUS_FILE_ERROR;
+import static android.provider.Downloads.Impl.STATUS_HTTP_DATA_ERROR;
+import static android.provider.Downloads.Impl.STATUS_TOO_MANY_REDIRECTS;
+import static android.provider.Downloads.Impl.STATUS_WAITING_FOR_NETWORK;
+import static android.provider.Downloads.Impl.STATUS_WAITING_TO_RETRY;
+import static android.text.format.DateUtils.SECOND_IN_MILLIS;
 import static com.android.providers.downloads.Constants.TAG;
+import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
+import static java.net.HttpURLConnection.HTTP_MOVED_PERM;
+import static java.net.HttpURLConnection.HTTP_MOVED_TEMP;
+import static java.net.HttpURLConnection.HTTP_OK;
+import static java.net.HttpURLConnection.HTTP_PARTIAL;
+import static java.net.HttpURLConnection.HTTP_SEE_OTHER;
+import static java.net.HttpURLConnection.HTTP_UNAVAILABLE;
 
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.drm.DrmManagerClient;
+import android.drm.DrmOutputStream;
+import android.net.ConnectivityManager;
 import android.net.INetworkPolicyListener;
+import android.net.NetworkInfo;
 import android.net.NetworkPolicyManager;
-import android.net.Proxy;
 import android.net.TrafficStats;
-import android.net.http.AndroidHttpClient;
 import android.os.FileUtils;
 import android.os.PowerManager;
 import android.os.Process;
@@ -35,39 +52,51 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
 
-import org.apache.http.Header;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.conn.params.ConnRouteParams;
+import com.android.providers.downloads.DownloadInfo.NetworkState;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.SyncFailedException;
-import java.net.URI;
-import java.net.URISyntaxException;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLConnection;
+
+import libcore.io.IoUtils;
 
 /**
- * Runs an actual download
+ * Task which executes a given {@link DownloadInfo}: making network requests,
+ * persisting data to disk, and updating {@link DownloadProvider}.
  */
-public class DownloadThread extends Thread {
+public class DownloadThread implements Runnable {
+
+    // TODO: bind each download to a specific network interface to avoid state
+    // checking races once we have ConnectivityManager API
+
+    private static final int HTTP_REQUESTED_RANGE_NOT_SATISFIABLE = 416;
+    private static final int HTTP_TEMP_REDIRECT = 307;
+
+    private static final int DEFAULT_TIMEOUT = (int) (20 * SECOND_IN_MILLIS);
 
     private final Context mContext;
     private final DownloadInfo mInfo;
     private final SystemFacade mSystemFacade;
     private final StorageManager mStorageManager;
-    private DrmConvertSession mDrmConvertSession;
+    private final DownloadNotifier mNotifier;
 
     private volatile boolean mPolicyDirty;
 
     public DownloadThread(Context context, SystemFacade systemFacade, DownloadInfo info,
-            StorageManager storageManager) {
+            StorageManager storageManager, DownloadNotifier notifier) {
         mContext = context;
         mSystemFacade = systemFacade;
         mInfo = info;
         mStorageManager = storageManager;
+        mNotifier = notifier;
     }
 
     /**
@@ -86,12 +115,8 @@ public class DownloadThread extends Thread {
      */
     static class State {
         public String mFilename;
-        public FileOutputStream mStream;
         public String mMimeType;
-        public boolean mCountRetry = false;
         public int mRetryAfter = 0;
-        public int mRedirectCount = 0;
-        public String mNewUri;
         public boolean mGotData = false;
         public String mRequestUri;
         public long mTotalBytes = -1;
@@ -100,6 +125,7 @@ public class DownloadThread extends Thread {
         public boolean mContinuingDownload = false;
         public long mBytesNotified = 0;
         public long mTimeLastNotification = 0;
+        public int mNetworkType = ConnectivityManager.TYPE_NONE;
 
         /** Historical bytes/second speed of this download. */
         public long mSpeed;
@@ -108,6 +134,13 @@ public class DownloadThread extends Thread {
         /** Bytes transferred since current sample started. */
         public long mSpeedSampleBytes;
 
+        public long mContentLength = -1;
+        public String mContentDisposition;
+        public String mContentLocation;
+
+        public int mRedirectionCount;
+        public URL mUrl;
+
         public State(DownloadInfo info) {
             mMimeType = Intent.normalizeMimeType(info.mMimeType);
             mRequestUri = info.mUri;
@@ -115,33 +148,23 @@ public class DownloadThread extends Thread {
             mTotalBytes = info.mTotalBytes;
             mCurrentBytes = info.mCurrentBytes;
         }
+
+        public void resetBeforeExecute() {
+            // Reset any state from previous execution
+            mContentLength = -1;
+            mContentDisposition = null;
+            mContentLocation = null;
+            mRedirectionCount = 0;
+        }
     }
 
-    /**
-     * State within executeDownload()
-     */
-    private static class InnerState {
-        public String mHeaderContentLength;
-        public String mHeaderContentDisposition;
-        public String mHeaderContentLocation;
-    }
-
-    /**
-     * Raised from methods called by executeDownload() to indicate that the download should be
-     * retried immediately.
-     */
-    private class RetryDownload extends Throwable {}
-
-    /**
-     * Executes the download in a separate thread
-     */
     @Override
     public void run() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
         try {
             runInternal();
         } finally {
-            DownloadHandler.getInstance().dequeueDownload(mInfo.mId);
+            mNotifier.notifyDownloadSpeed(mInfo.mId, 0);
         }
     }
 
@@ -155,9 +178,9 @@ public class DownloadThread extends Thread {
         }
 
         State state = new State(mInfo);
-        AndroidHttpClient client = null;
         PowerManager.WakeLock wakeLock = null;
         int finalStatus = Downloads.Impl.STATUS_UNKNOWN_ERROR;
+        int numFailed = mInfo.mNumFailed;
         String errorMsg = null;
 
         final NetworkPolicyManager netPolicy = NetworkPolicyManager.from(mContext);
@@ -170,39 +193,29 @@ public class DownloadThread extends Thread {
             // while performing download, register for rules updates
             netPolicy.registerListener(mPolicyListener);
 
-            if (Constants.LOGV) {
-                Log.v(Constants.TAG, "initiating download for " + mInfo.mUri);
+            Log.i(Constants.TAG, "Download " + mInfo.mId + " starting");
+
+            // Remember which network this download started on; used to
+            // determine if errors were due to network changes.
+            final NetworkInfo info = mSystemFacade.getActiveNetworkInfo(mInfo.mUid);
+            if (info != null) {
+                state.mNetworkType = info.getType();
             }
 
-            client = AndroidHttpClient.newInstance(userAgent(), mContext);
-
-            // network traffic on this thread should be counted against the
-            // requesting uid, and is tagged with well-known value.
+            // Network traffic on this thread should be counted against the
+            // requesting UID, and is tagged with well-known value.
             TrafficStats.setThreadStatsTag(TrafficStats.TAG_SYSTEM_DOWNLOAD);
             TrafficStats.setThreadStatsUid(mInfo.mUid);
 
-            boolean finished = false;
-            while(!finished) {
-                Log.i(Constants.TAG, "Initiating request for download " + mInfo.mId);
-                // Set or unset proxy, which may have changed since last GET request.
-                // setDefaultProxy() supports null as proxy parameter.
-                ConnRouteParams.setDefaultProxy(client.getParams(),
-                        Proxy.getPreferredHttpHost(mContext, state.mRequestUri));
-                HttpGet request = new HttpGet(state.mRequestUri);
-                try {
-                    executeDownload(state, client, request);
-                    finished = true;
-                } catch (RetryDownload exc) {
-                    // fall through
-                } finally {
-                    request.abort();
-                    request = null;
-                }
+            try {
+                // TODO: migrate URL sanity checking into client side of API
+                state.mUrl = new URL(state.mRequestUri);
+            } catch (MalformedURLException e) {
+                throw new StopRequestException(STATUS_BAD_REQUEST, e);
             }
 
-            if (Constants.LOGV) {
-                Log.v(Constants.TAG, "download completed for " + mInfo.mUri);
-            }
+            executeDownload(state);
+
             finalizeDestinationFile(state);
             finalStatus = Downloads.Impl.STATUS_SUCCESS;
         } catch (StopRequestException error) {
@@ -213,9 +226,37 @@ public class DownloadThread extends Thread {
             if (Constants.LOGV) {
                 Log.w(Constants.TAG, msg, error);
             }
-            finalStatus = error.mFinalStatus;
+            finalStatus = error.getFinalStatus();
+
+            // Nobody below our level should request retries, since we handle
+            // failure counts at this level.
+            if (finalStatus == STATUS_WAITING_TO_RETRY) {
+                throw new IllegalStateException("Execution should always throw final error codes");
+            }
+
+            // Some errors should be retryable, unless we fail too many times.
+            if (isStatusRetryable(finalStatus)) {
+                if (state.mGotData) {
+                    numFailed = 1;
+                } else {
+                    numFailed += 1;
+                }
+
+                if (numFailed < Constants.MAX_RETRIES) {
+                    final NetworkInfo info = mSystemFacade.getActiveNetworkInfo(mInfo.mUid);
+                    if (info != null && info.getType() == state.mNetworkType
+                            && info.isConnected()) {
+                        // Underlying network is still intact, use normal backoff
+                        finalStatus = STATUS_WAITING_TO_RETRY;
+                    } else {
+                        // Network changed, retry on any next available
+                        finalStatus = STATUS_WAITING_FOR_NETWORK;
+                    }
+                }
+            }
+
             // fall through to finally block
-        } catch (Throwable ex) { //sometimes the socket code throws unchecked exceptions
+        } catch (Throwable ex) {
             errorMsg = ex.getMessage();
             String msg = "Exception for id " + mInfo.mId + ": " + errorMsg;
             Log.w(Constants.TAG, msg, ex);
@@ -225,14 +266,11 @@ public class DownloadThread extends Thread {
             TrafficStats.clearThreadStatsTag();
             TrafficStats.clearThreadStatsUid();
 
-            if (client != null) {
-                client.close();
-                client = null;
-            }
             cleanupDestination(state, finalStatus);
-            notifyDownloadCompleted(finalStatus, state.mCountRetry, state.mRetryAfter,
-                                    state.mGotData, state.mFilename,
-                                    state.mNewUri, state.mMimeType, errorMsg);
+            notifyDownloadCompleted(state, finalStatus, errorMsg, numFailed);
+
+            Log.i(Constants.TAG, "Download " + mInfo.mId + " finished with status "
+                    + Downloads.Impl.statusToString(finalStatus));
 
             netPolicy.unregisterListener(mPolicyListener);
 
@@ -245,16 +283,12 @@ public class DownloadThread extends Thread {
     }
 
     /**
-     * Fully execute a single download request - setup and send the request, handle the response,
-     * and transfer the data to the destination file.
+     * Fully execute a single download request. Setup and send the request,
+     * handle the response, and transfer the data to the destination file.
      */
-    private void executeDownload(State state, AndroidHttpClient client, HttpGet request)
-            throws StopRequestException, RetryDownload {
-        InnerState innerState = new InnerState();
-        byte data[] = new byte[Constants.BUFFER_SIZE];
-
-        setupDestinationFile(state, innerState);
-        addRequestHeaders(state, request);
+    private void executeDownload(State state) throws StopRequestException {
+        state.resetBeforeExecute();
+        setupDestinationFile(state);
 
         // skip when already finished; remove after fixing race in 5217390
         if (state.mCurrentBytes == state.mTotalBytes) {
@@ -263,19 +297,136 @@ public class DownloadThread extends Thread {
             return;
         }
 
-        // check just before sending the request to avoid using an invalid connection at all
-        checkConnectivity();
+        while (state.mRedirectionCount++ < Constants.MAX_REDIRECTS) {
+            // Open connection and follow any redirects until we have a useful
+            // response with body.
+            HttpURLConnection conn = null;
+            try {
+                checkConnectivity();
+                conn = (HttpURLConnection) state.mUrl.openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(DEFAULT_TIMEOUT);
+                conn.setReadTimeout(DEFAULT_TIMEOUT);
 
-        HttpResponse response = sendRequest(state, client, request);
-        handleExceptionalStatus(state, innerState, response);
+                addRequestHeaders(state, conn);
 
-        if (Constants.LOGV) {
-            Log.v(Constants.TAG, "received response for " + mInfo.mUri);
+                final int responseCode = conn.getResponseCode();
+                switch (responseCode) {
+                    case HTTP_OK:
+                        if (state.mContinuingDownload) {
+                            throw new StopRequestException(
+                                    STATUS_CANNOT_RESUME, "Expected partial, but received OK");
+                        }
+                        processResponseHeaders(state, conn);
+                        transferData(state, conn);
+                        return;
+
+                    case HTTP_PARTIAL:
+                        if (!state.mContinuingDownload) {
+                            throw new StopRequestException(
+                                    STATUS_CANNOT_RESUME, "Expected OK, but received partial");
+                        }
+                        transferData(state, conn);
+                        return;
+
+                    case HTTP_MOVED_PERM:
+                    case HTTP_MOVED_TEMP:
+                    case HTTP_SEE_OTHER:
+                    case HTTP_TEMP_REDIRECT:
+                        final String location = conn.getHeaderField("Location");
+                        state.mUrl = new URL(state.mUrl, location);
+                        if (responseCode == HTTP_MOVED_PERM) {
+                            // Push updated URL back to database
+                            state.mRequestUri = state.mUrl.toString();
+                        }
+                        continue;
+
+                    case HTTP_REQUESTED_RANGE_NOT_SATISFIABLE:
+                        throw new StopRequestException(
+                                STATUS_CANNOT_RESUME, "Requested range not satisfiable");
+
+                    case HTTP_UNAVAILABLE:
+                        parseRetryAfterHeaders(state, conn);
+                        throw new StopRequestException(
+                                HTTP_UNAVAILABLE, conn.getResponseMessage());
+
+                    case HTTP_INTERNAL_ERROR:
+                        throw new StopRequestException(
+                                HTTP_INTERNAL_ERROR, conn.getResponseMessage());
+
+                    default:
+                        StopRequestException.throwUnhandledHttpError(
+                                responseCode, conn.getResponseMessage());
+                }
+            } catch (IOException e) {
+                // Trouble with low-level sockets
+                throw new StopRequestException(STATUS_HTTP_DATA_ERROR, e);
+
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         }
 
-        processResponseHeaders(state, innerState, response);
-        InputStream entityStream = openResponseEntity(state, response);
-        transferData(state, innerState, data, entityStream);
+        throw new StopRequestException(STATUS_TOO_MANY_REDIRECTS, "Too many redirects");
+    }
+
+    /**
+     * Transfer data from the given connection to the destination file.
+     */
+    private void transferData(State state, HttpURLConnection conn) throws StopRequestException {
+        DrmManagerClient drmClient = null;
+        InputStream in = null;
+        OutputStream out = null;
+        FileDescriptor outFd = null;
+        try {
+            try {
+                in = conn.getInputStream();
+            } catch (IOException e) {
+                throw new StopRequestException(STATUS_HTTP_DATA_ERROR, e);
+            }
+
+            try {
+                if (DownloadDrmHelper.isDrmConvertNeeded(state.mMimeType)) {
+                    drmClient = new DrmManagerClient(mContext);
+                    final RandomAccessFile file = new RandomAccessFile(
+                            new File(state.mFilename), "rw");
+                    out = new DrmOutputStream(drmClient, file, state.mMimeType);
+                    outFd = file.getFD();
+                } else {
+                    out = new FileOutputStream(state.mFilename, true);
+                    outFd = ((FileOutputStream) out).getFD();
+                }
+            } catch (IOException e) {
+                throw new StopRequestException(STATUS_FILE_ERROR, e);
+            }
+
+            // Start streaming data, periodically watch for pause/cancel
+            // commands and checking disk space as needed.
+            transferData(state, in, out);
+
+            try {
+                if (out instanceof DrmOutputStream) {
+                    ((DrmOutputStream) out).finish();
+                }
+            } catch (IOException e) {
+                throw new StopRequestException(STATUS_FILE_ERROR, e);
+            }
+
+        } finally {
+            if (drmClient != null) {
+                drmClient.release();
+            }
+
+            IoUtils.closeQuietly(in);
+
+            try {
+                if (out != null) out.flush();
+                if (outFd != null) outFd.sync();
+            } catch (IOException e) {
+            } finally {
+                IoUtils.closeQuietly(out);
+            }
+        }
     }
 
     /**
@@ -285,40 +436,38 @@ public class DownloadThread extends Thread {
         // checking connectivity will apply current policy
         mPolicyDirty = false;
 
-        int networkUsable = mInfo.checkCanUseNetwork();
-        if (networkUsable != DownloadInfo.NETWORK_OK) {
+        final NetworkState networkUsable = mInfo.checkCanUseNetwork();
+        if (networkUsable != NetworkState.OK) {
             int status = Downloads.Impl.STATUS_WAITING_FOR_NETWORK;
-            if (networkUsable == DownloadInfo.NETWORK_UNUSABLE_DUE_TO_SIZE) {
+            if (networkUsable == NetworkState.UNUSABLE_DUE_TO_SIZE) {
                 status = Downloads.Impl.STATUS_QUEUED_FOR_WIFI;
                 mInfo.notifyPauseDueToSize(true);
-            } else if (networkUsable == DownloadInfo.NETWORK_RECOMMENDED_UNUSABLE_DUE_TO_SIZE) {
+            } else if (networkUsable == NetworkState.RECOMMENDED_UNUSABLE_DUE_TO_SIZE) {
                 status = Downloads.Impl.STATUS_QUEUED_FOR_WIFI;
                 mInfo.notifyPauseDueToSize(false);
             }
-            throw new StopRequestException(status,
-                    mInfo.getLogMessageForNetworkError(networkUsable));
+            throw new StopRequestException(status, networkUsable.name());
         }
     }
 
     /**
-     * Transfer as much data as possible from the HTTP response to the destination file.
-     * @param data buffer to use to read data
-     * @param entityStream stream for reading the HTTP response entity
+     * Transfer as much data as possible from the HTTP response to the
+     * destination file.
      */
-    private void transferData(
-            State state, InnerState innerState, byte[] data, InputStream entityStream)
+    private void transferData(State state, InputStream in, OutputStream out)
             throws StopRequestException {
+        final byte data[] = new byte[Constants.BUFFER_SIZE];
         for (;;) {
-            int bytesRead = readFromResponse(state, innerState, data, entityStream);
+            int bytesRead = readFromResponse(state, data, in);
             if (bytesRead == -1) { // success, end of stream already reached
-                handleEndOfStream(state, innerState);
+                handleEndOfStream(state);
                 return;
             }
 
             state.mGotData = true;
-            writeDataToDestination(state, data, bytesRead);
+            writeDataToDestination(state, data, bytesRead, out);
             state.mCurrentBytes += bytesRead;
-            reportProgress(state, innerState);
+            reportProgress(state);
 
             if (Constants.LOGVV) {
                 Log.v(Constants.TAG, "downloaded " + state.mCurrentBytes + " for "
@@ -332,11 +481,10 @@ public class DownloadThread extends Thread {
     /**
      * Called after a successful completion to take any necessary action on the downloaded file.
      */
-    private void finalizeDestinationFile(State state) throws StopRequestException {
+    private void finalizeDestinationFile(State state) {
         if (state.mFilename != null) {
             // make sure the file is readable
             FileUtils.setPermissions(state.mFilename, 0644, -1, -1);
-            syncDestination(state);
         }
     }
 
@@ -345,64 +493,12 @@ public class DownloadThread extends Thread {
      * the downloaded file.
      */
     private void cleanupDestination(State state, int finalStatus) {
-        if (mDrmConvertSession != null) {
-            finalStatus = mDrmConvertSession.close(state.mFilename);
-        }
-
-        closeDestination(state);
         if (state.mFilename != null && Downloads.Impl.isStatusError(finalStatus)) {
             if (Constants.LOGVV) {
                 Log.d(TAG, "cleanupDestination() deleting " + state.mFilename);
             }
             new File(state.mFilename).delete();
             state.mFilename = null;
-        }
-    }
-
-    /**
-     * Sync the destination file to storage.
-     */
-    private void syncDestination(State state) {
-        FileOutputStream downloadedFileStream = null;
-        try {
-            downloadedFileStream = new FileOutputStream(state.mFilename, true);
-            downloadedFileStream.getFD().sync();
-        } catch (FileNotFoundException ex) {
-            Log.w(Constants.TAG, "file " + state.mFilename + " not found: " + ex);
-        } catch (SyncFailedException ex) {
-            Log.w(Constants.TAG, "file " + state.mFilename + " sync failed: " + ex);
-        } catch (IOException ex) {
-            Log.w(Constants.TAG, "IOException trying to sync " + state.mFilename + ": " + ex);
-        } catch (RuntimeException ex) {
-            Log.w(Constants.TAG, "exception while syncing file: ", ex);
-        } finally {
-            if(downloadedFileStream != null) {
-                try {
-                    downloadedFileStream.close();
-                } catch (IOException ex) {
-                    Log.w(Constants.TAG, "IOException while closing synced file: ", ex);
-                } catch (RuntimeException ex) {
-                    Log.w(Constants.TAG, "exception while closing file: ", ex);
-                }
-            }
-        }
-    }
-
-    /**
-     * Close the destination output stream.
-     */
-    private void closeDestination(State state) {
-        try {
-            // close the file
-            if (state.mStream != null) {
-                state.mStream.close();
-                state.mStream = null;
-            }
-        } catch (IOException ex) {
-            if (Constants.LOGV) {
-                Log.v(Constants.TAG, "exception when closing the file after download : " + ex);
-            }
-            // nothing can really be done if the file can't be closed
         }
     }
 
@@ -430,7 +526,7 @@ public class DownloadThread extends Thread {
     /**
      * Report download progress through the database if necessary.
      */
-    private void reportProgress(State state, InnerState innerState) {
+    private void reportProgress(State state) {
         final long now = SystemClock.elapsedRealtime();
 
         final long sampleDelta = now - state.mSpeedSampleStart;
@@ -444,10 +540,13 @@ public class DownloadThread extends Thread {
                 state.mSpeed = ((state.mSpeed * 3) + sampleSpeed) / 4;
             }
 
+            // Only notify once we have a full sample window
+            if (state.mSpeedSampleStart != 0) {
+                mNotifier.notifyDownloadSpeed(mInfo.mId, state.mSpeed);
+            }
+
             state.mSpeedSampleStart = now;
             state.mSpeedSampleBytes = state.mCurrentBytes;
-
-            DownloadHandler.getInstance().setCurrentSpeed(mInfo.mId, state.mSpeed);
         }
 
         if (state.mCurrentBytes - state.mBytesNotified > Constants.MIN_PROGRESS_STEP &&
@@ -465,37 +564,25 @@ public class DownloadThread extends Thread {
      * @param data buffer containing the data to write
      * @param bytesRead how many bytes to write from the buffer
      */
-    private void writeDataToDestination(State state, byte[] data, int bytesRead)
+    private void writeDataToDestination(State state, byte[] data, int bytesRead, OutputStream out)
             throws StopRequestException {
-        for (;;) {
+        mStorageManager.verifySpaceBeforeWritingToFile(
+                mInfo.mDestination, state.mFilename, bytesRead);
+
+        boolean forceVerified = false;
+        while (true) {
             try {
-                if (state.mStream == null) {
-                    state.mStream = new FileOutputStream(state.mFilename, true);
-                }
-                mStorageManager.verifySpaceBeforeWritingToFile(mInfo.mDestination, state.mFilename,
-                        bytesRead);
-                if (!DownloadDrmHelper.isDrmConvertNeeded(mInfo.mMimeType)) {
-                    state.mStream.write(data, 0, bytesRead);
-                } else {
-                    byte[] convertedData = mDrmConvertSession.convert(data, bytesRead);
-                    if (convertedData != null) {
-                        state.mStream.write(convertedData, 0, convertedData.length);
-                    } else {
-                        throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
-                                "Error converting drm data.");
-                    }
-                }
+                out.write(data, 0, bytesRead);
                 return;
             } catch (IOException ex) {
-                // couldn't write to file. are we out of space? check.
-                // TODO this check should only be done once. why is this being done
-                // in a while(true) loop (see the enclosing statement: for(;;)
-                if (state.mStream != null) {
+                // TODO: better differentiate between DRM and disk failures
+                if (!forceVerified) {
+                    // couldn't write to file. are we out of space? check.
                     mStorageManager.verifySpace(mInfo.mDestination, state.mFilename, bytesRead);
-                }
-            } finally {
-                if (mInfo.mDestination == Downloads.Impl.DESTINATION_EXTERNAL) {
-                    closeDestination(state);
+                    forceVerified = true;
+                } else {
+                    throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
+                            "Failed to write data: " + ex);
                 }
             }
         }
@@ -505,29 +592,30 @@ public class DownloadThread extends Thread {
      * Called when we've reached the end of the HTTP response stream, to update the database and
      * check for consistency.
      */
-    private void handleEndOfStream(State state, InnerState innerState) throws StopRequestException {
+    private void handleEndOfStream(State state) throws StopRequestException {
         ContentValues values = new ContentValues();
         values.put(Downloads.Impl.COLUMN_CURRENT_BYTES, state.mCurrentBytes);
-        if (innerState.mHeaderContentLength == null) {
+        if (state.mContentLength == -1) {
             values.put(Downloads.Impl.COLUMN_TOTAL_BYTES, state.mCurrentBytes);
         }
         mContext.getContentResolver().update(mInfo.getAllDownloadsUri(), values, null, null);
 
-        boolean lengthMismatched = (innerState.mHeaderContentLength != null)
-                && (state.mCurrentBytes != Integer.parseInt(innerState.mHeaderContentLength));
+        final boolean lengthMismatched = (state.mContentLength != -1)
+                && (state.mCurrentBytes != state.mContentLength);
         if (lengthMismatched) {
             if (cannotResume(state)) {
-                throw new StopRequestException(Downloads.Impl.STATUS_CANNOT_RESUME,
-                        "mismatched content length");
+                throw new StopRequestException(STATUS_CANNOT_RESUME,
+                        "mismatched content length; unable to resume");
             } else {
-                throw new StopRequestException(getFinalStatusForHttpError(state),
+                throw new StopRequestException(STATUS_HTTP_DATA_ERROR,
                         "closed socket before end of file");
             }
         }
     }
 
     private boolean cannotResume(State state) {
-        return state.mCurrentBytes > 0 && !mInfo.mNoIntegrity && state.mHeaderETag == null;
+        return (state.mCurrentBytes > 0 && !mInfo.mNoIntegrity && state.mHeaderETag == null)
+                || DownloadDrmHelper.isDrmConvertNeeded(state.mMimeType);
     }
 
     /**
@@ -536,91 +624,51 @@ public class DownloadThread extends Thread {
      * @param entityStream stream for reading the HTTP response entity
      * @return the number of bytes actually read or -1 if the end of the stream has been reached
      */
-    private int readFromResponse(State state, InnerState innerState, byte[] data,
-                                 InputStream entityStream) throws StopRequestException {
+    private int readFromResponse(State state, byte[] data, InputStream entityStream)
+            throws StopRequestException {
         try {
             return entityStream.read(data);
         } catch (IOException ex) {
-            logNetworkState(mInfo.mUid);
+            // TODO: handle stream errors the same as other retries
+            if ("unexpected end of stream".equals(ex.getMessage())) {
+                return -1;
+            }
+
             ContentValues values = new ContentValues();
             values.put(Downloads.Impl.COLUMN_CURRENT_BYTES, state.mCurrentBytes);
             mContext.getContentResolver().update(mInfo.getAllDownloadsUri(), values, null, null);
             if (cannotResume(state)) {
-                String message = "while reading response: " + ex.toString()
-                + ", can't resume interrupted download with no ETag";
-                throw new StopRequestException(Downloads.Impl.STATUS_CANNOT_RESUME,
-                        message, ex);
+                throw new StopRequestException(STATUS_CANNOT_RESUME,
+                        "Failed reading response: " + ex + "; unable to resume", ex);
             } else {
-                throw new StopRequestException(getFinalStatusForHttpError(state),
-                        "while reading response: " + ex.toString(), ex);
+                throw new StopRequestException(STATUS_HTTP_DATA_ERROR,
+                        "Failed reading response: " + ex, ex);
             }
         }
     }
 
     /**
-     * Open a stream for the HTTP response entity, handling I/O errors.
-     * @return an InputStream to read the response entity
+     * Prepare target file based on given network response. Derives filename and
+     * target size as needed.
      */
-    private InputStream openResponseEntity(State state, HttpResponse response)
+    private void processResponseHeaders(State state, HttpURLConnection conn)
             throws StopRequestException {
-        try {
-            return response.getEntity().getContent();
-        } catch (IOException ex) {
-            logNetworkState(mInfo.mUid);
-            throw new StopRequestException(getFinalStatusForHttpError(state),
-                    "while getting entity: " + ex.toString(), ex);
-        }
-    }
+        // TODO: fallocate the entire file if header gave us specific length
 
-    private void logNetworkState(int uid) {
-        if (Constants.LOGX) {
-            Log.i(Constants.TAG,
-                    "Net " + (Helpers.isNetworkAvailable(mSystemFacade, uid) ? "Up" : "Down"));
-        }
-    }
-
-    /**
-     * Read HTTP response headers and take appropriate action, including setting up the destination
-     * file and updating the database.
-     */
-    private void processResponseHeaders(State state, InnerState innerState, HttpResponse response)
-            throws StopRequestException {
-        if (state.mContinuingDownload) {
-            // ignore response headers on resume requests
-            return;
-        }
-
-        readResponseHeaders(state, innerState, response);
-        if (DownloadDrmHelper.isDrmConvertNeeded(state.mMimeType)) {
-            mDrmConvertSession = DrmConvertSession.open(mContext, state.mMimeType);
-            if (mDrmConvertSession == null) {
-                throw new StopRequestException(Downloads.Impl.STATUS_NOT_ACCEPTABLE, "Mimetype "
-                        + state.mMimeType + " can not be converted.");
-            }
-        }
+        readResponseHeaders(state, conn);
 
         state.mFilename = Helpers.generateSaveFile(
                 mContext,
                 mInfo.mUri,
                 mInfo.mHint,
-                innerState.mHeaderContentDisposition,
-                innerState.mHeaderContentLocation,
+                state.mContentDisposition,
+                state.mContentLocation,
                 state.mMimeType,
                 mInfo.mDestination,
-                (innerState.mHeaderContentLength != null) ?
-                        Long.parseLong(innerState.mHeaderContentLength) : 0,
-                mInfo.mIsPublicApi, mStorageManager);
-        try {
-            state.mStream = new FileOutputStream(state.mFilename);
-        } catch (FileNotFoundException exc) {
-            throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
-                    "while opening destination file: " + exc.toString(), exc);
-        }
-        if (Constants.LOGV) {
-            Log.v(Constants.TAG, "writing " + mInfo.mUri + " to " + state.mFilename);
-        }
+                state.mContentLength,
+                mStorageManager);
 
-        updateDatabaseFromHeaders(state, innerState);
+        updateDatabaseFromHeaders(state);
         // check connectivity again now that we know the total size
         checkConnectivity();
     }
@@ -629,7 +677,7 @@ public class DownloadThread extends Thread {
      * Update necessary database fields based on values of HTTP response headers that have been
      * read.
      */
-    private void updateDatabaseFromHeaders(State state, InnerState innerState) {
+    private void updateDatabaseFromHeaders(State state) {
         ContentValues values = new ContentValues();
         values.put(Downloads.Impl._DATA, state.mFilename);
         if (state.mHeaderETag != null) {
@@ -645,219 +693,48 @@ public class DownloadThread extends Thread {
     /**
      * Read headers from the HTTP response and store them into local state.
      */
-    private void readResponseHeaders(State state, InnerState innerState, HttpResponse response)
+    private void readResponseHeaders(State state, HttpURLConnection conn)
             throws StopRequestException {
-        Header header = response.getFirstHeader("Content-Disposition");
-        if (header != null) {
-            innerState.mHeaderContentDisposition = header.getValue();
-        }
-        header = response.getFirstHeader("Content-Location");
-        if (header != null) {
-            innerState.mHeaderContentLocation = header.getValue();
-        }
+        state.mContentDisposition = conn.getHeaderField("Content-Disposition");
+        state.mContentLocation = conn.getHeaderField("Content-Location");
+
         if (state.mMimeType == null) {
-            header = response.getFirstHeader("Content-Type");
-            if (header != null) {
-                state.mMimeType = Intent.normalizeMimeType(header.getValue());
-            }
-        }
-        header = response.getFirstHeader("ETag");
-        if (header != null) {
-            state.mHeaderETag = header.getValue();
-        }
-        String headerTransferEncoding = null;
-        header = response.getFirstHeader("Transfer-Encoding");
-        if (header != null) {
-            headerTransferEncoding = header.getValue();
-        }
-        if (headerTransferEncoding == null) {
-            header = response.getFirstHeader("Content-Length");
-            if (header != null) {
-                innerState.mHeaderContentLength = header.getValue();
-                state.mTotalBytes = mInfo.mTotalBytes =
-                        Long.parseLong(innerState.mHeaderContentLength);
-            }
-        } else {
-            // Ignore content-length with transfer-encoding - 2616 4.4 3
-            if (Constants.LOGVV) {
-                Log.v(Constants.TAG,
-                        "ignoring content-length because of xfer-encoding");
-            }
-        }
-        if (Constants.LOGVV) {
-            Log.v(Constants.TAG, "Content-Disposition: " +
-                    innerState.mHeaderContentDisposition);
-            Log.v(Constants.TAG, "Content-Length: " + innerState.mHeaderContentLength);
-            Log.v(Constants.TAG, "Content-Location: " + innerState.mHeaderContentLocation);
-            Log.v(Constants.TAG, "Content-Type: " + state.mMimeType);
-            Log.v(Constants.TAG, "ETag: " + state.mHeaderETag);
-            Log.v(Constants.TAG, "Transfer-Encoding: " + headerTransferEncoding);
+            state.mMimeType = Intent.normalizeMimeType(conn.getContentType());
         }
 
-        boolean noSizeInfo = innerState.mHeaderContentLength == null
-                && (headerTransferEncoding == null
-                    || !headerTransferEncoding.equalsIgnoreCase("chunked"));
+        state.mHeaderETag = conn.getHeaderField("ETag");
+
+        final String transferEncoding = conn.getHeaderField("Transfer-Encoding");
+        if (transferEncoding == null) {
+            state.mContentLength = getHeaderFieldLong(conn, "Content-Length", -1);
+        } else {
+            Log.i(TAG, "Ignoring Content-Length since Transfer-Encoding is also defined");
+            state.mContentLength = -1;
+        }
+
+        state.mTotalBytes = state.mContentLength;
+        mInfo.mTotalBytes = state.mContentLength;
+
+        final boolean noSizeInfo = state.mContentLength == -1
+                && (transferEncoding == null || !transferEncoding.equalsIgnoreCase("chunked"));
         if (!mInfo.mNoIntegrity && noSizeInfo) {
-            throw new StopRequestException(Downloads.Impl.STATUS_HTTP_DATA_ERROR,
+            throw new StopRequestException(STATUS_CANNOT_RESUME,
                     "can't know size of download, giving up");
         }
     }
 
-    /**
-     * Check the HTTP response status and handle anything unusual (e.g. not 200/206).
-     */
-    private void handleExceptionalStatus(State state, InnerState innerState, HttpResponse response)
-            throws StopRequestException, RetryDownload {
-        int statusCode = response.getStatusLine().getStatusCode();
-        if (statusCode == 503 && mInfo.mNumFailed < Constants.MAX_RETRIES) {
-            handleServiceUnavailable(state, response);
-        }
-        if (statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307) {
-            handleRedirect(state, response, statusCode);
-        }
-
-        if (Constants.LOGV) {
-            Log.i(Constants.TAG, "recevd_status = " + statusCode +
-                    ", mContinuingDownload = " + state.mContinuingDownload);
-        }
-        int expectedStatus = state.mContinuingDownload ? 206 : Downloads.Impl.STATUS_SUCCESS;
-        if (statusCode != expectedStatus) {
-            handleOtherStatus(state, innerState, statusCode);
-        }
-    }
-
-    /**
-     * Handle a status that we don't know how to deal with properly.
-     */
-    private void handleOtherStatus(State state, InnerState innerState, int statusCode)
-            throws StopRequestException {
-        if (statusCode == 416) {
-            // range request failed. it should never fail.
-            throw new IllegalStateException("Http Range request failure: totalBytes = " +
-                    state.mTotalBytes + ", bytes recvd so far: " + state.mCurrentBytes);
-        }
-        int finalStatus;
-        if (Downloads.Impl.isStatusError(statusCode)) {
-            finalStatus = statusCode;
-        } else if (statusCode >= 300 && statusCode < 400) {
-            finalStatus = Downloads.Impl.STATUS_UNHANDLED_REDIRECT;
-        } else if (state.mContinuingDownload && statusCode == Downloads.Impl.STATUS_SUCCESS) {
-            finalStatus = Downloads.Impl.STATUS_CANNOT_RESUME;
+    private void parseRetryAfterHeaders(State state, HttpURLConnection conn) {
+        state.mRetryAfter = conn.getHeaderFieldInt("Retry-After", -1);
+        if (state.mRetryAfter < 0) {
+            state.mRetryAfter = 0;
         } else {
-            finalStatus = Downloads.Impl.STATUS_UNHANDLED_HTTP_CODE;
-        }
-        throw new StopRequestException(finalStatus, "http error " +
-                statusCode + ", mContinuingDownload: " + state.mContinuingDownload);
-    }
-
-    /**
-     * Handle a 3xx redirect status.
-     */
-    private void handleRedirect(State state, HttpResponse response, int statusCode)
-            throws StopRequestException, RetryDownload {
-        if (Constants.LOGVV) {
-            Log.v(Constants.TAG, "got HTTP redirect " + statusCode);
-        }
-        if (state.mRedirectCount >= Constants.MAX_REDIRECTS) {
-            throw new StopRequestException(Downloads.Impl.STATUS_TOO_MANY_REDIRECTS,
-                    "too many redirects");
-        }
-        Header header = response.getFirstHeader("Location");
-        if (header == null) {
-            return;
-        }
-        if (Constants.LOGVV) {
-            Log.v(Constants.TAG, "Location :" + header.getValue());
-        }
-
-        String newUri;
-        try {
-            newUri = new URI(mInfo.mUri).resolve(new URI(header.getValue())).toString();
-        } catch(URISyntaxException ex) {
-            if (Constants.LOGV) {
-                Log.d(Constants.TAG, "Couldn't resolve redirect URI " + header.getValue()
-                        + " for " + mInfo.mUri);
+            if (state.mRetryAfter < Constants.MIN_RETRY_AFTER) {
+                state.mRetryAfter = Constants.MIN_RETRY_AFTER;
+            } else if (state.mRetryAfter > Constants.MAX_RETRY_AFTER) {
+                state.mRetryAfter = Constants.MAX_RETRY_AFTER;
             }
-            throw new StopRequestException(Downloads.Impl.STATUS_HTTP_DATA_ERROR,
-                    "Couldn't resolve redirect URI");
-        }
-        ++state.mRedirectCount;
-        state.mRequestUri = newUri;
-        if (statusCode == 301 || statusCode == 303) {
-            // use the new URI for all future requests (should a retry/resume be necessary)
-            state.mNewUri = newUri;
-        }
-        throw new RetryDownload();
-    }
-
-    /**
-     * Handle a 503 Service Unavailable status by processing the Retry-After header.
-     */
-    private void handleServiceUnavailable(State state, HttpResponse response)
-            throws StopRequestException {
-        if (Constants.LOGVV) {
-            Log.v(Constants.TAG, "got HTTP response code 503");
-        }
-        state.mCountRetry = true;
-        Header header = response.getFirstHeader("Retry-After");
-        if (header != null) {
-           try {
-               if (Constants.LOGVV) {
-                   Log.v(Constants.TAG, "Retry-After :" + header.getValue());
-               }
-               state.mRetryAfter = Integer.parseInt(header.getValue());
-               if (state.mRetryAfter < 0) {
-                   state.mRetryAfter = 0;
-               } else {
-                   if (state.mRetryAfter < Constants.MIN_RETRY_AFTER) {
-                       state.mRetryAfter = Constants.MIN_RETRY_AFTER;
-                   } else if (state.mRetryAfter > Constants.MAX_RETRY_AFTER) {
-                       state.mRetryAfter = Constants.MAX_RETRY_AFTER;
-                   }
-                   state.mRetryAfter += Helpers.sRandom.nextInt(Constants.MIN_RETRY_AFTER + 1);
-                   state.mRetryAfter *= 1000;
-               }
-           } catch (NumberFormatException ex) {
-               // ignored - retryAfter stays 0 in this case.
-           }
-        }
-        throw new StopRequestException(Downloads.Impl.STATUS_WAITING_TO_RETRY,
-                "got 503 Service Unavailable, will retry later");
-    }
-
-    /**
-     * Send the request to the server, handling any I/O exceptions.
-     */
-    private HttpResponse sendRequest(State state, AndroidHttpClient client, HttpGet request)
-            throws StopRequestException {
-        try {
-            return client.execute(request);
-        } catch (IllegalArgumentException ex) {
-            throw new StopRequestException(Downloads.Impl.STATUS_HTTP_DATA_ERROR,
-                    "while trying to execute request: " + ex.toString(), ex);
-        } catch (IOException ex) {
-            logNetworkState(mInfo.mUid);
-            throw new StopRequestException(getFinalStatusForHttpError(state),
-                    "while trying to execute request: " + ex.toString(), ex);
-        }
-    }
-
-    private int getFinalStatusForHttpError(State state) {
-        int networkUsable = mInfo.checkCanUseNetwork();
-        if (networkUsable != DownloadInfo.NETWORK_OK) {
-            switch (networkUsable) {
-                case DownloadInfo.NETWORK_UNUSABLE_DUE_TO_SIZE:
-                case DownloadInfo.NETWORK_RECOMMENDED_UNUSABLE_DUE_TO_SIZE:
-                    return Downloads.Impl.STATUS_QUEUED_FOR_WIFI;
-                default:
-                    return Downloads.Impl.STATUS_WAITING_FOR_NETWORK;
-            }
-        } else if (mInfo.mNumFailed < Constants.MAX_RETRIES) {
-            state.mCountRetry = true;
-            return Downloads.Impl.STATUS_WAITING_TO_RETRY;
-        } else {
-            Log.w(Constants.TAG, "reached max retries for " + mInfo.mId);
-            return Downloads.Impl.STATUS_HTTP_DATA_ERROR;
+            state.mRetryAfter += Helpers.sRandom.nextInt(Constants.MIN_RETRY_AFTER + 1);
+            state.mRetryAfter *= 1000;
         }
     }
 
@@ -865,8 +742,7 @@ public class DownloadThread extends Thread {
      * Prepare the destination file to receive data.  If the file already exists, we'll set up
      * appropriately for resumption.
      */
-    private void setupDestinationFile(State state, InnerState innerState)
-            throws StopRequestException {
+    private void setupDestinationFile(State state) throws StopRequestException {
         if (!TextUtils.isEmpty(state.mFilename)) { // only true if we've already run a thread for this download
             if (Constants.LOGV) {
                 Log.i(Constants.TAG, "have run thread before for id: " + mInfo.mId +
@@ -913,15 +789,9 @@ public class DownloadThread extends Thread {
                         Log.i(Constants.TAG, "resuming download for id: " + mInfo.mId +
                                 ", and starting with file of length: " + fileLength);
                     }
-                    try {
-                        state.mStream = new FileOutputStream(state.mFilename, true);
-                    } catch (FileNotFoundException exc) {
-                        throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
-                                "while opening destination for resuming: " + exc.toString(), exc);
-                    }
                     state.mCurrentBytes = (int) fileLength;
                     if (mInfo.mTotalBytes != -1) {
-                        innerState.mHeaderContentLength = Long.toString(mInfo.mTotalBytes);
+                        state.mContentLength = mInfo.mTotalBytes;
                     }
                     state.mHeaderETag = mInfo.mETag;
                     state.mContinuingDownload = true;
@@ -933,30 +803,30 @@ public class DownloadThread extends Thread {
                 }
             }
         }
-
-        if (state.mStream != null && mInfo.mDestination == Downloads.Impl.DESTINATION_EXTERNAL) {
-            closeDestination(state);
-        }
     }
 
     /**
      * Add custom headers for this download to the HTTP request.
      */
-    private void addRequestHeaders(State state, HttpGet request) {
+    private void addRequestHeaders(State state, HttpURLConnection conn) {
         for (Pair<String, String> header : mInfo.getHeaders()) {
-            request.addHeader(header.first, header.second);
+            conn.addRequestProperty(header.first, header.second);
         }
+
+        // Only splice in user agent when not already defined
+        if (conn.getRequestProperty("User-Agent") == null) {
+            conn.addRequestProperty("User-Agent", userAgent());
+        }
+
+        // Defeat transparent gzip compression, since it doesn't allow us to
+        // easily resume partial downloads.
+        conn.setRequestProperty("Accept-Encoding", "identity");
 
         if (state.mContinuingDownload) {
             if (state.mHeaderETag != null) {
-                request.addHeader("If-Match", state.mHeaderETag);
+                conn.addRequestProperty("If-Match", state.mHeaderETag);
             }
-            request.addHeader("Range", "bytes=" + state.mCurrentBytes + "-");
-            if (Constants.LOGV) {
-                Log.i(Constants.TAG, "Adding Range header: " +
-                        "bytes=" + state.mCurrentBytes + "-");
-                Log.i(Constants.TAG, "  totalBytes = " + state.mTotalBytes);
-            }
+            conn.addRequestProperty("Range", "bytes=" + state.mCurrentBytes + "-");
         }
     }
 
@@ -964,35 +834,27 @@ public class DownloadThread extends Thread {
      * Stores information about the completed download, and notifies the initiating application.
      */
     private void notifyDownloadCompleted(
-            int status, boolean countRetry, int retryAfter, boolean gotData,
-            String filename, String uri, String mimeType, String errorMsg) {
-        notifyThroughDatabase(
-                status, countRetry, retryAfter, gotData, filename, uri, mimeType,
-                errorMsg);
-        if (Downloads.Impl.isStatusCompleted(status)) {
+            State state, int finalStatus, String errorMsg, int numFailed) {
+        notifyThroughDatabase(state, finalStatus, errorMsg, numFailed);
+        if (Downloads.Impl.isStatusCompleted(finalStatus)) {
             mInfo.sendIntentIfRequested();
         }
     }
 
     private void notifyThroughDatabase(
-            int status, boolean countRetry, int retryAfter, boolean gotData,
-            String filename, String uri, String mimeType, String errorMsg) {
+            State state, int finalStatus, String errorMsg, int numFailed) {
         ContentValues values = new ContentValues();
-        values.put(Downloads.Impl.COLUMN_STATUS, status);
-        values.put(Downloads.Impl._DATA, filename);
-        if (uri != null) {
-            values.put(Downloads.Impl.COLUMN_URI, uri);
-        }
-        values.put(Downloads.Impl.COLUMN_MIME_TYPE, mimeType);
+        values.put(Downloads.Impl.COLUMN_STATUS, finalStatus);
+        values.put(Downloads.Impl._DATA, state.mFilename);
+        values.put(Downloads.Impl.COLUMN_MIME_TYPE, state.mMimeType);
         values.put(Downloads.Impl.COLUMN_LAST_MODIFICATION, mSystemFacade.currentTimeMillis());
-        values.put(Constants.RETRY_AFTER_X_REDIRECT_COUNT, retryAfter);
-        if (!countRetry) {
-            values.put(Constants.FAILED_CONNECTIONS, 0);
-        } else if (gotData) {
-            values.put(Constants.FAILED_CONNECTIONS, 1);
-        } else {
-            values.put(Constants.FAILED_CONNECTIONS, mInfo.mNumFailed + 1);
+        values.put(Downloads.Impl.COLUMN_FAILED_CONNECTIONS, numFailed);
+        values.put(Constants.RETRY_AFTER_X_REDIRECT_COUNT, state.mRetryAfter);
+
+        if (!TextUtils.equals(mInfo.mUri, state.mRequestUri)) {
+            values.put(Downloads.Impl.COLUMN_URI, state.mRequestUri);
         }
+
         // save the error message. could be useful to developers.
         if (!TextUtils.isEmpty(errorMsg)) {
             values.put(Downloads.Impl.COLUMN_ERROR_MSG, errorMsg);
@@ -1021,4 +883,27 @@ public class DownloadThread extends Thread {
             mPolicyDirty = true;
         }
     };
+
+    public static long getHeaderFieldLong(URLConnection conn, String field, long defaultValue) {
+        try {
+            return Long.parseLong(conn.getHeaderField(field));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Return if given status is eligible to be treated as
+     * {@link android.provider.Downloads.Impl#STATUS_WAITING_TO_RETRY}.
+     */
+    public static boolean isStatusRetryable(int status) {
+        switch (status) {
+            case STATUS_HTTP_DATA_ERROR:
+            case HTTP_UNAVAILABLE:
+            case HTTP_INTERNAL_ERROR:
+                return true;
+            default:
+                return false;
+        }
+    }
 }

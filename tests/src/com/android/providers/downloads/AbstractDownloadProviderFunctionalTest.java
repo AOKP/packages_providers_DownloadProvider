@@ -16,7 +16,7 @@
 
 package com.android.providers.downloads;
 
-import static com.google.testing.littlemock.LittleMock.mock;
+import static org.mockito.Mockito.mock;
 
 import android.app.NotificationManager;
 import android.content.ComponentName;
@@ -34,6 +34,7 @@ import android.test.mock.MockContentResolver;
 import android.util.Log;
 
 import com.google.mockwebserver.MockResponse;
+import com.google.mockwebserver.MockStreamResponse;
 import com.google.mockwebserver.MockWebServer;
 import com.google.mockwebserver.RecordedRequest;
 import com.google.mockwebserver.SocketPolicy;
@@ -52,11 +53,11 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
     protected static final String LOG_TAG = "DownloadProviderFunctionalTest";
     private static final String PROVIDER_AUTHORITY = "downloads";
     protected static final long RETRY_DELAY_MILLIS = 61 * 1000;
-    protected static final String FILE_CONTENT = "hello world hello world hello world hello world";
-    protected static final int HTTP_OK = 200;
-    protected static final int HTTP_PARTIAL_CONTENT = 206;
-    protected static final int HTTP_NOT_FOUND = 404;
-    protected static final int HTTP_SERVICE_UNAVAILABLE = 503;
+
+    protected static final String
+            FILE_CONTENT = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    private final MockitoHelper mMockitoHelper = new MockitoHelper();
 
     protected MockWebServer mServer;
     protected MockContentResolverWithNotify mResolver;
@@ -149,6 +150,7 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
     @Override
     protected void setUp() throws Exception {
         super.setUp();
+        mMockitoHelper.setUp(getClass());
 
         // Since we're testing a system app, AppDataDirGuesser doesn't find our
         // cache dir, so set it explicitly.
@@ -161,6 +163,7 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
         setContext(mTestContext);
         setupService();
         getService().mSystemFacade = mSystemFacade;
+        mSystemFacade.setUp();
         assertTrue(isDatabaseEmpty()); // ensure we're not messing with real data
         mServer = new MockWebServer();
         mServer.play();
@@ -170,6 +173,7 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
     protected void tearDown() throws Exception {
         cleanUpDownloads();
         mServer.shutdown();
+        mMockitoHelper.tearDown();
         super.tearDown();
     }
 
@@ -217,6 +221,10 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
         mServer.enqueue(resp);
     }
 
+    void enqueueResponse(MockStreamResponse resp) {
+        mServer.enqueue(resp);
+    }
+
     MockResponse buildResponse(int status, String body) {
         return new MockResponse().setResponseCode(status).setBody(body)
                 .setHeader("Content-type", "text/plain")
@@ -244,11 +252,6 @@ public abstract class AbstractDownloadProviderFunctionalTest extends
 
     String getServerUri(String path) throws MalformedURLException, UnknownHostException {
         return mServer.getUrl(path).toString();
-    }
-
-    public void runService() throws Exception {
-        startService(null);
-        mSystemFacade.runAllThreads();
     }
 
     protected String readStream(InputStream inputStream) throws IOException {

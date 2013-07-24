@@ -37,17 +37,23 @@ import android.os.Binder;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
+import android.os.SELinux;
+import android.provider.BaseColumns;
 import android.provider.Downloads;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
+import android.text.format.DateUtils;
 import android.util.Log;
 
+import com.android.internal.util.IndentingPrintWriter;
 import com.google.android.collect.Maps;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -384,7 +390,7 @@ public final class DownloadProvider extends ContentProvider {
                         Downloads.Impl.COLUMN_VISIBILITY + " INTEGER, " +
                         Downloads.Impl.COLUMN_CONTROL + " INTEGER, " +
                         Downloads.Impl.COLUMN_STATUS + " INTEGER, " +
-                        Constants.FAILED_CONNECTIONS + " INTEGER, " +
+                        Downloads.Impl.COLUMN_FAILED_CONNECTIONS + " INTEGER, " +
                         Downloads.Impl.COLUMN_LAST_MODIFICATION + " BIGINT, " +
                         Downloads.Impl.COLUMN_NOTIFICATION_PACKAGE + " TEXT, " +
                         Downloads.Impl.COLUMN_NOTIFICATION_CLASS + " TEXT, " +
@@ -436,8 +442,7 @@ public final class DownloadProvider extends ContentProvider {
             appInfo = getContext().getPackageManager().
                     getApplicationInfo("com.android.defcontainer", 0);
         } catch (NameNotFoundException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+            Log.wtf(Constants.TAG, "Could not get ApplicationInfo for com.android.defconatiner", e);
         }
         if (appInfo != null) {
             mDefContainerUid = appInfo.uid;
@@ -446,7 +451,12 @@ public final class DownloadProvider extends ContentProvider {
         // saves us by getting some initialization code in DownloadService out of the way.
         Context context = getContext();
         context.startService(new Intent(context, DownloadService.class));
-        mDownloadsDataDir = StorageManager.getInstance(getContext()).getDownloadDataDirectory();
+        mDownloadsDataDir = StorageManager.getDownloadDataDirectory(getContext());
+        try {
+            SELinux.restorecon(mDownloadsDataDir.getCanonicalPath());
+        } catch (IOException e) {
+            Log.wtf(Constants.TAG, "Could not get canonical path for download directory", e);
+        }
         return true;
     }
 
@@ -1199,6 +1209,41 @@ public final class DownloadProvider extends ContentProvider {
         return ret;
     }
 
+    @Override
+    public void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+        final IndentingPrintWriter pw = new IndentingPrintWriter(writer, "  ", 120);
+
+        pw.println("Downloads updated in last hour:");
+        pw.increaseIndent();
+
+        final SQLiteDatabase db = mOpenHelper.getReadableDatabase();
+        final long modifiedAfter = mSystemFacade.currentTimeMillis() - DateUtils.HOUR_IN_MILLIS;
+        final Cursor cursor = db.query(DB_TABLE, null,
+                Downloads.Impl.COLUMN_LAST_MODIFICATION + ">" + modifiedAfter, null, null, null,
+                Downloads.Impl._ID + " ASC");
+        try {
+            final String[] cols = cursor.getColumnNames();
+            final int idCol = cursor.getColumnIndex(BaseColumns._ID);
+            while (cursor.moveToNext()) {
+                pw.println("Download #" + cursor.getInt(idCol) + ":");
+                pw.increaseIndent();
+                for (int i = 0; i < cols.length; i++) {
+                    // Omit sensitive data when dumping
+                    if (Downloads.Impl.COLUMN_COOKIE_DATA.equals(cols[i])) {
+                        continue;
+                    }
+                    pw.printPair(cols[i], cursor.getString(i));
+                }
+                pw.println();
+                pw.decreaseIndent();
+            }
+        } finally {
+            cursor.close();
+        }
+
+        pw.decreaseIndent();
+    }
+
     private void logVerboseOpenFileInfo(Uri uri, String mode) {
         Log.v(Constants.TAG, "openFile uri: " + uri + ", mode: " + mode
                 + ", uid: " + Binder.getCallingUid());
@@ -1229,7 +1274,7 @@ public final class DownloadProvider extends ContentProvider {
                     Log.v(Constants.TAG, "file exists in openFile");
                 }
             }
-           cursor.close();
+            cursor.close();
         }
     }
 

@@ -31,20 +31,26 @@ import android.os.Environment;
 import android.provider.Downloads;
 import android.provider.Downloads.Impl;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.Pair;
 
+import com.android.internal.annotations.GuardedBy;
 import com.android.internal.util.IndentingPrintWriter;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * Stores information about an individual download.
  */
 public class DownloadInfo {
+    // TODO: move towards these in-memory objects being sources of truth, and
+    // periodically pushing to provider.
+
     public static class Reader {
         private ContentResolver mResolver;
         private Cursor mCursor;
@@ -54,8 +60,10 @@ public class DownloadInfo {
             mCursor = cursor;
         }
 
-        public DownloadInfo newDownloadInfo(Context context, SystemFacade systemFacade) {
-            DownloadInfo info = new DownloadInfo(context, systemFacade);
+        public DownloadInfo newDownloadInfo(Context context, SystemFacade systemFacade,
+                StorageManager storageManager, DownloadNotifier notifier) {
+            final DownloadInfo info = new DownloadInfo(
+                    context, systemFacade, storageManager, notifier);
             updateFromDatabase(info);
             readRequestHeaders(info);
             return info;
@@ -71,7 +79,7 @@ public class DownloadInfo {
             info.mDestination = getInt(Downloads.Impl.COLUMN_DESTINATION);
             info.mVisibility = getInt(Downloads.Impl.COLUMN_VISIBILITY);
             info.mStatus = getInt(Downloads.Impl.COLUMN_STATUS);
-            info.mNumFailed = getInt(Constants.FAILED_CONNECTIONS);
+            info.mNumFailed = getInt(Downloads.Impl.COLUMN_FAILED_CONNECTIONS);
             int retryRedirect = getInt(Constants.RETRY_AFTER_X_REDIRECT_COUNT);
             info.mRetryAfter = retryRedirect & 0xfffffff;
             info.mLastMod = getLong(Downloads.Impl.COLUMN_LAST_MODIFICATION);
@@ -146,51 +154,55 @@ public class DownloadInfo {
         }
     }
 
-    // the following NETWORK_* constants are used to indicates specfic reasons for disallowing a
-    // download from using a network, since specific causes can require special handling
-
     /**
-     * The network is usable for the given download.
+     * Constants used to indicate network state for a specific download, after
+     * applying any requested constraints.
      */
-    public static final int NETWORK_OK = 1;
+    public enum NetworkState {
+        /**
+         * The network is usable for the given download.
+         */
+        OK,
 
-    /**
-     * There is no network connectivity.
-     */
-    public static final int NETWORK_NO_CONNECTION = 2;
+        /**
+         * There is no network connectivity.
+         */
+        NO_CONNECTION,
 
-    /**
-     * The download exceeds the maximum size for this network.
-     */
-    public static final int NETWORK_UNUSABLE_DUE_TO_SIZE = 3;
+        /**
+         * The download exceeds the maximum size for this network.
+         */
+        UNUSABLE_DUE_TO_SIZE,
 
-    /**
-     * The download exceeds the recommended maximum size for this network, the user must confirm for
-     * this download to proceed without WiFi.
-     */
-    public static final int NETWORK_RECOMMENDED_UNUSABLE_DUE_TO_SIZE = 4;
+        /**
+         * The download exceeds the recommended maximum size for this network,
+         * the user must confirm for this download to proceed without WiFi.
+         */
+        RECOMMENDED_UNUSABLE_DUE_TO_SIZE,
 
-    /**
-     * The current connection is roaming, and the download can't proceed over a roaming connection.
-     */
-    public static final int NETWORK_CANNOT_USE_ROAMING = 5;
+        /**
+         * The current connection is roaming, and the download can't proceed
+         * over a roaming connection.
+         */
+        CANNOT_USE_ROAMING,
 
-    /**
-     * The app requesting the download specific that it can't use the current network connection.
-     */
-    public static final int NETWORK_TYPE_DISALLOWED_BY_REQUESTOR = 6;
+        /**
+         * The app requesting the download specific that it can't use the
+         * current network connection.
+         */
+        TYPE_DISALLOWED_BY_REQUESTOR,
 
-    /**
-     * Current network is blocked for requesting application.
-     */
-    public static final int NETWORK_BLOCKED = 7;
+        /**
+         * Current network is blocked for requesting application.
+         */
+        BLOCKED;
+    }
 
     /**
      * For intents used to notify the user that a download exceeds a size threshold, if this extra
      * is true, WiFi is required for this download size; otherwise, it is only recommended.
      */
     public static final String EXTRA_IS_WIFI_REQUIRED = "isWifiRequired";
-
 
     public long mId;
     public String mUri;
@@ -229,12 +241,28 @@ public class DownloadInfo {
     public int mFuzz;
 
     private List<Pair<String, String>> mRequestHeaders = new ArrayList<Pair<String, String>>();
-    private SystemFacade mSystemFacade;
-    private Context mContext;
 
-    private DownloadInfo(Context context, SystemFacade systemFacade) {
+    /**
+     * Result of last {@link DownloadThread} started by
+     * {@link #startDownloadIfReady(ExecutorService)}.
+     */
+    @GuardedBy("this")
+    private Future<?> mSubmittedTask;
+
+    @GuardedBy("this")
+    private DownloadThread mTask;
+
+    private final Context mContext;
+    private final SystemFacade mSystemFacade;
+    private final StorageManager mStorageManager;
+    private final DownloadNotifier mNotifier;
+
+    private DownloadInfo(Context context, SystemFacade systemFacade, StorageManager storageManager,
+            DownloadNotifier notifier) {
         mContext = context;
         mSystemFacade = systemFacade;
+        mStorageManager = storageManager;
+        mNotifier = notifier;
         mFuzz = Helpers.sRandom.nextInt(1001);
     }
 
@@ -285,14 +313,9 @@ public class DownloadInfo {
     }
 
     /**
-     * Returns whether this download (which the download manager hasn't seen yet)
-     * should be started.
+     * Returns whether this download should be enqueued.
      */
-    private boolean isReadyToStart(long now) {
-        if (DownloadHandler.getInstance().hasDownloadInQueue(mId)) {
-            // already running
-            return false;
-        }
+    private boolean isReadyToDownload() {
         if (mControl == Downloads.Impl.CONTROL_PAUSED) {
             // the download is paused, so it's not going to start
             return false;
@@ -306,10 +329,11 @@ public class DownloadInfo {
 
             case Downloads.Impl.STATUS_WAITING_FOR_NETWORK:
             case Downloads.Impl.STATUS_QUEUED_FOR_WIFI:
-                return checkCanUseNetwork() == NETWORK_OK;
+                return checkCanUseNetwork() == NetworkState.OK;
 
             case Downloads.Impl.STATUS_WAITING_TO_RETRY:
                 // download was waiting for a delayed restart
+                final long now = mSystemFacade.currentTimeMillis();
                 return restartTime(now) <= now;
             case Downloads.Impl.STATUS_DEVICE_NOT_FOUND_ERROR:
                 // is the media mounted?
@@ -337,21 +361,20 @@ public class DownloadInfo {
 
     /**
      * Returns whether this download is allowed to use the network.
-     * @return one of the NETWORK_* constants
      */
-    public int checkCanUseNetwork() {
+    public NetworkState checkCanUseNetwork() {
         final NetworkInfo info = mSystemFacade.getActiveNetworkInfo(mUid);
         if (info == null || !info.isConnected()) {
-            return NETWORK_NO_CONNECTION;
+            return NetworkState.NO_CONNECTION;
         }
         if (DetailedState.BLOCKED.equals(info.getDetailedState())) {
-            return NETWORK_BLOCKED;
+            return NetworkState.BLOCKED;
         }
-        if (!isRoamingAllowed() && mSystemFacade.isNetworkRoaming()) {
-            return NETWORK_CANNOT_USE_ROAMING;
+        if (mSystemFacade.isNetworkRoaming() && !isRoamingAllowed()) {
+            return NetworkState.CANNOT_USE_ROAMING;
         }
-        if (!mAllowMetered && mSystemFacade.isActiveNetworkMetered()) {
-            return NETWORK_TYPE_DISALLOWED_BY_REQUESTOR;
+        if (mSystemFacade.isActiveNetworkMetered() && !mAllowMetered) {
+            return NetworkState.TYPE_DISALLOWED_BY_REQUESTOR;
         }
         return checkIsNetworkTypeAllowed(info.getType());
     }
@@ -365,45 +388,16 @@ public class DownloadInfo {
     }
 
     /**
-     * @return a non-localized string appropriate for logging corresponding to one of the
-     * NETWORK_* constants.
-     */
-    public String getLogMessageForNetworkError(int networkError) {
-        switch (networkError) {
-            case NETWORK_RECOMMENDED_UNUSABLE_DUE_TO_SIZE:
-                return "download size exceeds recommended limit for mobile network";
-
-            case NETWORK_UNUSABLE_DUE_TO_SIZE:
-                return "download size exceeds limit for mobile network";
-
-            case NETWORK_NO_CONNECTION:
-                return "no network connection available";
-
-            case NETWORK_CANNOT_USE_ROAMING:
-                return "download cannot use the current network connection because it is roaming";
-
-            case NETWORK_TYPE_DISALLOWED_BY_REQUESTOR:
-                return "download was requested to not use the current network type";
-
-            case NETWORK_BLOCKED:
-                return "network is blocked for requesting application";
-
-            default:
-                return "unknown error with network connectivity";
-        }
-    }
-
-    /**
      * Check if this download can proceed over the given network type.
      * @param networkType a constant from ConnectivityManager.TYPE_*.
      * @return one of the NETWORK_* constants
      */
-    private int checkIsNetworkTypeAllowed(int networkType) {
+    private NetworkState checkIsNetworkTypeAllowed(int networkType) {
         if (mIsPublicApi) {
             final int flag = translateNetworkTypeToApiFlag(networkType);
             final boolean allowAllNetworkTypes = mAllowedNetworkTypes == ~0;
             if (!allowAllNetworkTypes && (flag & mAllowedNetworkTypes) == 0) {
-                return NETWORK_TYPE_DISALLOWED_BY_REQUESTOR;
+                return NetworkState.TYPE_DISALLOWED_BY_REQUESTOR;
             }
         }
         return checkSizeAllowedForNetwork(networkType);
@@ -433,42 +427,68 @@ public class DownloadInfo {
      * Check if the download's size prohibits it from running over the current network.
      * @return one of the NETWORK_* constants
      */
-    private int checkSizeAllowedForNetwork(int networkType) {
+    private NetworkState checkSizeAllowedForNetwork(int networkType) {
         if (mTotalBytes <= 0) {
-            return NETWORK_OK; // we don't know the size yet
+            return NetworkState.OK; // we don't know the size yet
         }
         if (networkType == ConnectivityManager.TYPE_WIFI) {
-            return NETWORK_OK; // anything goes over wifi
+            return NetworkState.OK; // anything goes over wifi
         }
         Long maxBytesOverMobile = mSystemFacade.getMaxBytesOverMobile();
         if (maxBytesOverMobile != null && mTotalBytes > maxBytesOverMobile) {
-            return NETWORK_UNUSABLE_DUE_TO_SIZE;
+            return NetworkState.UNUSABLE_DUE_TO_SIZE;
         }
         if (mBypassRecommendedSizeLimit == 0) {
             Long recommendedMaxBytesOverMobile = mSystemFacade.getRecommendedMaxBytesOverMobile();
             if (recommendedMaxBytesOverMobile != null
                     && mTotalBytes > recommendedMaxBytesOverMobile) {
-                return NETWORK_RECOMMENDED_UNUSABLE_DUE_TO_SIZE;
+                return NetworkState.RECOMMENDED_UNUSABLE_DUE_TO_SIZE;
             }
         }
-        return NETWORK_OK;
+        return NetworkState.OK;
     }
 
-    void startIfReady(long now, StorageManager storageManager) {
-        if (!isReadyToStart(now)) {
-            return;
-        }
+    /**
+     * If download is ready to start, and isn't already pending or executing,
+     * create a {@link DownloadThread} and enqueue it into given
+     * {@link Executor}.
+     *
+     * @return If actively downloading.
+     */
+    public boolean startDownloadIfReady(ExecutorService executor) {
+        synchronized (this) {
+            final boolean isReady = isReadyToDownload();
+            final boolean isActive = mSubmittedTask != null && !mSubmittedTask.isDone();
+            if (isReady && !isActive) {
+                if (mStatus != Impl.STATUS_RUNNING) {
+                    mStatus = Impl.STATUS_RUNNING;
+                    ContentValues values = new ContentValues();
+                    values.put(Impl.COLUMN_STATUS, mStatus);
+                    mContext.getContentResolver().update(getAllDownloadsUri(), values, null, null);
+                }
 
-        if (Constants.LOGV) {
-            Log.v(Constants.TAG, "Service spawning thread to handle download " + mId);
+                mTask = new DownloadThread(
+                        mContext, mSystemFacade, this, mStorageManager, mNotifier);
+                mSubmittedTask = executor.submit(mTask);
+            }
+            return isReady;
         }
-        if (mStatus != Impl.STATUS_RUNNING) {
-            mStatus = Impl.STATUS_RUNNING;
-            ContentValues values = new ContentValues();
-            values.put(Impl.COLUMN_STATUS, mStatus);
-            mContext.getContentResolver().update(getAllDownloadsUri(), values, null, null);
+    }
+
+    /**
+     * If download is ready to be scanned, enqueue it into the given
+     * {@link DownloadScanner}.
+     *
+     * @return If actively scanning.
+     */
+    public boolean startScanIfReady(DownloadScanner scanner) {
+        synchronized (this) {
+            final boolean isReady = shouldScanFile();
+            if (isReady) {
+                scanner.requestScan(this);
+            }
+            return isReady;
         }
-        DownloadHandler.getInstance().enqueueDownload(this);
     }
 
     public boolean isOnCache() {
@@ -553,15 +573,15 @@ public class DownloadInfo {
     }
 
     /**
-     * Returns the amount of time (as measured from the "now" parameter)
-     * at which a download will be active.
-     * 0 = immediately - service should stick around to handle this download.
-     * -1 = never - service can go away without ever waking up.
-     * positive value - service must wake up in the future, as specified in ms from "now"
+     * Return time when this download will be ready for its next action, in
+     * milliseconds after given time.
+     *
+     * @return If {@code 0}, download is ready to proceed immediately. If
+     *         {@link Long#MAX_VALUE}, then download has no future actions.
      */
-    long nextAction(long now) {
+    public long nextActionMillis(long now) {
         if (Downloads.Impl.isStatusCompleted(mStatus)) {
-            return -1;
+            return Long.MAX_VALUE;
         }
         if (mStatus != Downloads.Impl.STATUS_WAITING_TO_RETRY) {
             return 0;
@@ -576,7 +596,7 @@ public class DownloadInfo {
     /**
      * Returns whether a file should be scanned
      */
-    boolean shouldScanFile() {
+    public boolean shouldScanFile() {
         return (mMediaScanned == 0)
                 && (mDestination == Downloads.Impl.DESTINATION_EXTERNAL ||
                         mDestination == Downloads.Impl.DESTINATION_FILE_URI ||
@@ -592,12 +612,6 @@ public class DownloadInfo {
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra(EXTRA_IS_WIFI_REQUIRED, isWifiRequired);
         mContext.startActivity(intent);
-    }
-
-    void startDownloadThread() {
-        DownloadThread downloader = new DownloadThread(mContext, mSystemFacade, this,
-                StorageManager.getInstance(mContext));
-        mSystemFacade.startThread(downloader);
     }
 
     /**

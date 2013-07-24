@@ -16,17 +16,22 @@
 
 package com.android.providers.downloads;
 
+import static android.app.DownloadManager.STATUS_FAILED;
+import static android.app.DownloadManager.STATUS_SUCCESSFUL;
+import static android.text.format.DateUtils.MINUTE_IN_MILLIS;
+import static android.text.format.DateUtils.SECOND_IN_MILLIS;
+
 import android.app.DownloadManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
-import android.provider.Downloads;
+import android.os.SystemClock;
 import android.util.Log;
 
-import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.UnknownHostException;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Code common to tests that use the download manager public API.
@@ -42,6 +47,10 @@ public abstract class AbstractPublicApiTest extends AbstractDownloadProviderFunc
 
         public int getStatus() {
             return (int) getLongField(DownloadManager.COLUMN_STATUS);
+        }
+
+        public int getReason() {
+            return (int) getLongField(DownloadManager.COLUMN_REASON);
         }
 
         public int getStatusIfExists() {
@@ -86,7 +95,8 @@ public abstract class AbstractPublicApiTest extends AbstractDownloadProviderFunc
             ParcelFileDescriptor downloadedFile = mManager.openDownloadedFile(mId);
             assertTrue("Invalid file descriptor: " + downloadedFile,
                        downloadedFile.getFileDescriptor().valid());
-            InputStream stream = new FileInputStream(downloadedFile.getFileDescriptor());
+            final InputStream stream = new ParcelFileDescriptor.AutoCloseInputStream(
+                    downloadedFile);
             try {
                 return readStream(stream);
             } finally {
@@ -94,9 +104,52 @@ public abstract class AbstractPublicApiTest extends AbstractDownloadProviderFunc
             }
         }
 
-        void runUntilStatus(int status) throws Exception {
-            runService();
-            assertEquals(status, getStatus());
+        void runUntilStatus(int status) throws TimeoutException {
+            final long startMillis = mSystemFacade.currentTimeMillis();
+            startService(null);
+            waitForStatus(status, startMillis);
+        }
+
+        void runUntilStatus(int status, long timeout) throws TimeoutException {
+            final long startMillis = mSystemFacade.currentTimeMillis();
+            startService(null);
+            waitForStatus(status, startMillis, timeout);
+        }
+
+        void waitForStatus(int expected, long afterMillis) throws TimeoutException {
+            waitForStatus(expected, afterMillis, 15 * SECOND_IN_MILLIS);
+        }
+
+        void waitForStatus(int expected, long afterMillis, long timeout) throws TimeoutException {
+            int actual = -1;
+
+            final long elapsedTimeout = SystemClock.elapsedRealtime() + timeout;
+            while (SystemClock.elapsedRealtime() < elapsedTimeout) {
+                if (getLongField(DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP) >= afterMillis) {
+                    actual = getStatus();
+                    if (actual == STATUS_SUCCESSFUL || actual == STATUS_FAILED) {
+                        assertEquals(expected, actual);
+                        return;
+                    } else if (actual == expected) {
+                        return;
+                    }
+
+                    if (timeout > MINUTE_IN_MILLIS) {
+                        final int percent = (int) (100
+                                * getLongField(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                / getLongField(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                        Log.d(LOG_TAG, percent + "% complete");
+                    }
+                }
+
+                if (timeout > MINUTE_IN_MILLIS) {
+                    SystemClock.sleep(SECOND_IN_MILLIS * 3);
+                } else {
+                    SystemClock.sleep(100);
+                }
+            }
+
+            throw new TimeoutException("Expected status " + expected + "; only reached " + actual);
         }
 
         // max time to wait before giving up on the current download operation.
@@ -105,22 +158,10 @@ public abstract class AbstractPublicApiTest extends AbstractDownloadProviderFunc
         // download thread
         private static final int TIME_TO_SLEEP = 1000;
 
-        int runUntilDone() throws InterruptedException {
-            int sleepCounter = MAX_TIME_TO_WAIT_FOR_OPERATION * 1000 / TIME_TO_SLEEP;
-            for (int i = 0; i < sleepCounter; i++) {
-                int status = getStatusIfExists();
-                if (status == -1 || Downloads.Impl.isStatusCompleted(getStatus())) {
-                    // row doesn't exist or the download is done
-                    return status;
-                }
-                // download not done yet. sleep a while and try again
-                Thread.sleep(TIME_TO_SLEEP);
-            }
-            return 0; // failed
-        }
-
         // waits until progress_so_far is >= (progress)%
         boolean runUntilProgress(int progress) throws InterruptedException {
+            startService(null);
+
             int sleepCounter = MAX_TIME_TO_WAIT_FOR_OPERATION * 1000 / TIME_TO_SLEEP;
             int numBytesReceivedSoFar = 0;
             int totalBytes = 0;

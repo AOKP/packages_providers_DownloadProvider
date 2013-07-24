@@ -17,10 +17,6 @@
 package com.android.providers.downloads;
 
 import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.SystemClock;
@@ -29,6 +25,7 @@ import android.util.Log;
 import android.webkit.MimeTypeMap;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Random;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -43,6 +40,8 @@ public class Helpers {
     /** Regex used to parse content-disposition headers */
     private static final Pattern CONTENT_DISPOSITION_PATTERN =
             Pattern.compile("attachment;\\s*filename\\s*=\\s*\"([^\"]*)\"");
+
+    private static final Object sUniqueLock = new Object();
 
     private Helpers() {
     }
@@ -77,8 +76,10 @@ public class Helpers {
             String mimeType,
             int destination,
             long contentLength,
-            boolean isPublicApi, StorageManager storageManager) throws StopRequestException {
-        checkCanHandleDownload(context, mimeType, destination, isPublicApi);
+            StorageManager storageManager) throws StopRequestException {
+        if (contentLength < 0) {
+            contentLength = 0;
+        }
         String path;
         File base = null;
         if (destination == Downloads.Impl.DESTINATION_FILE_URI) {
@@ -90,10 +91,10 @@ public class Helpers {
                                              destination);
         }
         storageManager.verifySpace(destination, path, contentLength);
-        path = getFullPath(path, mimeType, destination, base);
         if (DownloadDrmHelper.isDrmConvertNeeded(mimeType)) {
             path = DownloadDrmHelper.modifyDrmFwLockFileExtension(path);
         }
+        path = getFullPath(path, mimeType, destination, base);
         return path;
     }
 
@@ -130,47 +131,20 @@ public class Helpers {
         if (Constants.LOGVV) {
             Log.v(Constants.TAG, "target file: " + filename + extension);
         }
-        return chooseUniqueFilename(destination, filename, extension, recoveryDir);
-    }
 
-    private static void checkCanHandleDownload(Context context, String mimeType, int destination,
-            boolean isPublicApi) throws StopRequestException {
-        if (isPublicApi) {
-            return;
-        }
+        synchronized (sUniqueLock) {
+            final String path = chooseUniqueFilenameLocked(
+                    destination, filename, extension, recoveryDir);
 
-        if (destination == Downloads.Impl.DESTINATION_EXTERNAL
-                || destination == Downloads.Impl.DESTINATION_CACHE_PARTITION_PURGEABLE) {
-            if (mimeType == null) {
-                throw new StopRequestException(Downloads.Impl.STATUS_NOT_ACCEPTABLE,
-                        "external download with no mime type not allowed");
+            // Claim this filename inside lock to prevent other threads from
+            // clobbering us. We're not paranoid enough to use O_EXCL.
+            try {
+                new File(path).createNewFile();
+            } catch (IOException e) {
+                throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
+                        "Failed to create target file " + path, e);
             }
-            if (!DownloadDrmHelper.isDrmMimeType(context, mimeType)) {
-                // Check to see if we are allowed to download this file. Only files
-                // that can be handled by the platform can be downloaded.
-                // special case DRM files, which we should always allow downloading.
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-
-                // We can provide data as either content: or file: URIs,
-                // so allow both.  (I think it would be nice if we just did
-                // everything as content: URIs)
-                // Actually, right now the download manager's UId restrictions
-                // prevent use from using content: so it's got to be file: or
-                // nothing
-
-                PackageManager pm = context.getPackageManager();
-                intent.setDataAndType(Uri.fromParts("file", "", null), mimeType);
-                ResolveInfo ri = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
-                //Log.i(Constants.TAG, "*** FILENAME QUERY " + intent + ": " + list);
-
-                if (ri == null) {
-                    if (Constants.LOGV) {
-                        Log.v(Constants.TAG, "no handler found for type " + mimeType);
-                    }
-                    throw new StopRequestException(Downloads.Impl.STATUS_NOT_ACCEPTABLE,
-                            "no handler found for this download type");
-                }
-            }
+            return path;
         }
     }
 
@@ -321,7 +295,7 @@ public class Helpers {
         return extension;
     }
 
-    private static String chooseUniqueFilename(int destination, String filename,
+    private static String chooseUniqueFilenameLocked(int destination, String filename,
             String extension, boolean recoveryDir) throws StopRequestException {
         String fullFilename = filename + extension;
         if (!new File(fullFilename).exists()
@@ -362,14 +336,6 @@ public class Helpers {
         }
         throw new StopRequestException(Downloads.Impl.STATUS_FILE_ERROR,
                 "failed to generate an unused filename on internal download storage");
-    }
-
-    /**
-     * Returns whether the network is available
-     */
-    public static boolean isNetworkAvailable(SystemFacade system, int uid) {
-        final NetworkInfo info = system.getActiveNetworkInfo(uid);
-        return info != null && info.isConnected();
     }
 
     /**
