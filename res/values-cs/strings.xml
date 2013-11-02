@@ -38,9 +38,9 @@
     <string name="notification_need_wifi_for_size" msgid="2556172885154833575">"Vzhledem k velikosti stahovaného souboru je vyžadováno připojení Wi-Fi."</string>
     <string name="notification_paused_in_background" msgid="4328508073283591772">"Pozastaveno na pozadí."</string>
     <string name="wifi_required_title" msgid="1995971416871498179">"Stahovaný soubor je pro síť operátora příliš velký"</string>
-    <string name="wifi_required_body" msgid="3067694630143784449">"K dokončení tohoto stahování o velikosti <xliff:g id="SIZE">%s </xliff:g> je třeba připojení Wi-Fi. "\n\n"Chcete-li stahování spustit při příštím připojení k síti Wi-Fi, dotkněte se možnosti <xliff:g id="QUEUE_TEXT">%s </xliff:g>."</string>
+    <string name="wifi_required_body" msgid="3067694630143784449">"K dokončení tohoto stahování o velikosti <xliff:g id="SIZE">%s </xliff:g> je třeba připojení Wi-Fi. \n\nChcete-li stahování spustit při příštím připojení k síti Wi-Fi, dotkněte se možnosti <xliff:g id="QUEUE_TEXT">%s </xliff:g>."</string>
     <string name="wifi_recommended_title" msgid="7441589306734687400">"Zařadit do fronty pro pozdější stažení?"</string>
-    <string name="wifi_recommended_body" msgid="1314735166699936073">"Stahování (<xliff:g id="SIZE">%s </xliff:g>) může zkrátit výdrž baterie nebo příliš zatížit mobilní připojení a přivodit poplatky dle datového tarifu."\n\n" Chcete-li stahování spustit při dalším připojení k Wi-Fi, dotkněte se možnosti <xliff:g id="QUEUE_TEXT">%s</xliff:g>."</string>
+    <string name="wifi_recommended_body" msgid="1314735166699936073">"Stahování (<xliff:g id="SIZE">%s </xliff:g>) může zkrátit výdrž baterie nebo příliš zatížit mobilní připojení a přivodit poplatky dle datového tarifu.\n\n Chcete-li stahování spustit při dalším připojení k Wi-Fi, dotkněte se možnosti <xliff:g id="QUEUE_TEXT">%s</xliff:g>."</string>
     <string name="button_queue_for_wifi" msgid="422576726189179221">"Fronta"</string>
     <string name="button_cancel_download" msgid="2430166148737975604">"Zrušit"</string>
     <string name="button_start_now" msgid="792123674007840864">"Spustit"</string>
@@ -55,4 +55,9 @@
   </plurals>
     <string name="download_remaining" msgid="3139295890887972718">"<xliff:g id="DURATION">%s</xliff:g> do stažení"</string>
     <string name="download_no_application_title" msgid="7935659741162801699">"Soubor nelze otevřít"</string>
+    <string name="root_downloads" msgid="4098414876292351487">"Ke stažení"</string>
+    <string name="download_queued" msgid="3302638231377947451">"Ve frontě"</string>
+    <string name="download_running" msgid="3925050393361158266">"Probíhá"</string>
+    <string name="download_error" msgid="5144180777324573236">"Neúspěšné"</string>
+    <string name="download_running_percent" msgid="4529799113107391817">"Probíhá (<xliff:g id="NUMBER">%d</xliff:g> <xliff:g id="PERCENT">%%</xliff:g>)"</string>
 </resources>

@@ -21,23 +21,47 @@ import static android.app.DownloadManager.COLUMN_LOCAL_URI;
 import static android.app.DownloadManager.COLUMN_MEDIA_TYPE;
 import static android.app.DownloadManager.COLUMN_URI;
 import static android.provider.Downloads.Impl.ALL_DOWNLOADS_CONTENT_URI;
+import static com.android.providers.downloads.Constants.TAG;
 
 import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Downloads.Impl.RequestHeaders;
+import android.util.Log;
 
 import java.io.File;
 
 public class OpenHelper {
     /**
-     * Build an {@link Intent} to view the download at current {@link Cursor}
-     * position, handling subtleties around installing packages.
+     * Build and start an {@link Intent} to view the download with given ID,
+     * handling subtleties around installing packages.
      */
-    public static Intent buildViewIntent(Context context, long id) {
+    public static boolean startViewIntent(Context context, long id, int intentFlags) {
+        final Intent intent = OpenHelper.buildViewIntent(context, id);
+        if (intent == null) {
+            Log.w(TAG, "No intent built for " + id);
+            return false;
+        }
+
+        intent.addFlags(intentFlags);
+        try {
+            context.startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException e) {
+            Log.w(TAG, "Failed to start " + intent + ": " + e);
+            return false;
+        }
+    }
+
+    /**
+     * Build an {@link Intent} to view the download with given ID, handling
+     * subtleties around installing packages.
+     */
+    private static Intent buildViewIntent(Context context, long id) {
         final DownloadManager downManager = (DownloadManager) context.getSystemService(
                 Context.DOWNLOAD_SERVICE);
         downManager.setAccessAllDownloads(true);
@@ -45,7 +69,7 @@ public class OpenHelper {
         final Cursor cursor = downManager.query(new DownloadManager.Query().setFilterById(id));
         try {
             if (!cursor.moveToFirst()) {
-                throw new IllegalArgumentException("Missing download " + id);
+                return null;
             }
 
             final Uri localUri = getCursorUri(cursor, COLUMN_LOCAL_URI);
@@ -54,7 +78,6 @@ public class OpenHelper {
             mimeType = DownloadDrmHelper.getOriginalMimeType(context, file, mimeType);
 
             final Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
             if ("application/vnd.android.package-archive".equals(mimeType)) {
                 // PackageInstaller doesn't like content URIs, so open file
@@ -66,9 +89,12 @@ public class OpenHelper {
                 intent.putExtra(Intent.EXTRA_REFERRER, getRefererUri(context, id));
                 intent.putExtra(Intent.EXTRA_ORIGINATING_UID, getOriginatingUid(context, id));
             } else if ("file".equals(localUri.getScheme())) {
+                intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                 intent.setDataAndType(
                         ContentUris.withAppendedId(ALL_DOWNLOADS_CONTENT_URI, id), mimeType);
             } else {
+                intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 intent.setDataAndType(localUri, mimeType);
             }
 
@@ -119,10 +145,6 @@ public class OpenHelper {
 
     private static Uri getCursorUri(Cursor cursor, String column) {
         return Uri.parse(getCursorString(cursor, column));
-    }
-
-    private static long getCursorLong(Cursor cursor, String column) {
-        return cursor.getLong(cursor.getColumnIndexOrThrow(column));
     }
 
     private static File getCursorFile(Cursor cursor, String column) {

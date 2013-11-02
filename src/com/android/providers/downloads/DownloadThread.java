@@ -20,6 +20,7 @@ import static android.provider.Downloads.Impl.STATUS_BAD_REQUEST;
 import static android.provider.Downloads.Impl.STATUS_CANNOT_RESUME;
 import static android.provider.Downloads.Impl.STATUS_FILE_ERROR;
 import static android.provider.Downloads.Impl.STATUS_HTTP_DATA_ERROR;
+import static android.provider.Downloads.Impl.STATUS_SUCCESS;
 import static android.provider.Downloads.Impl.STATUS_TOO_MANY_REDIRECTS;
 import static android.provider.Downloads.Impl.STATUS_WAITING_FOR_NETWORK;
 import static android.provider.Downloads.Impl.STATUS_WAITING_TO_RETRY;
@@ -47,12 +48,15 @@ import android.os.FileUtils;
 import android.os.PowerManager;
 import android.os.Process;
 import android.os.SystemClock;
+import android.os.WorkSource;
 import android.provider.Downloads;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
 
 import com.android.providers.downloads.DownloadInfo.NetworkState;
+
+import libcore.io.IoUtils;
 
 import java.io.File;
 import java.io.FileDescriptor;
@@ -65,8 +69,6 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
-
-import libcore.io.IoUtils;
 
 /**
  * Task which executes a given {@link DownloadInfo}: making network requests,
@@ -188,6 +190,7 @@ public class DownloadThread implements Runnable {
 
         try {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, Constants.TAG);
+            wakeLock.setWorkSource(new WorkSource(mInfo.mUid));
             wakeLock.acquire();
 
             // while performing download, register for rules updates
@@ -263,6 +266,10 @@ public class DownloadThread implements Runnable {
             finalStatus = Downloads.Impl.STATUS_UNKNOWN_ERROR;
             // falls through to the code that reports an error
         } finally {
+            if (finalStatus == STATUS_SUCCESS) {
+                TrafficStats.incrementOperationCount(1);
+            }
+
             TrafficStats.clearThreadStatsTag();
             TrafficStats.clearThreadStatsUid();
 
@@ -512,7 +519,7 @@ public class DownloadThread implements Runnable {
                 throw new StopRequestException(
                         Downloads.Impl.STATUS_PAUSED_BY_APP, "download paused by owner");
             }
-            if (mInfo.mStatus == Downloads.Impl.STATUS_CANCELED) {
+            if (mInfo.mStatus == Downloads.Impl.STATUS_CANCELED || mInfo.mDeleted) {
                 throw new StopRequestException(Downloads.Impl.STATUS_CANCELED, "download canceled");
             }
         }

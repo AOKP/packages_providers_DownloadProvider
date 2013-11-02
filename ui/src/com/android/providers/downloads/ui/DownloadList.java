@@ -19,7 +19,6 @@ package com.android.providers.downloads.ui;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
-import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -33,6 +32,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Parcelable;
 import android.provider.BaseColumns;
+import android.provider.DocumentsContract;
 import android.provider.Downloads;
 import android.util.Log;
 import android.util.SparseBooleanArray;
@@ -147,6 +147,17 @@ public class DownloadList extends Activity {
 
     @Override
     public void onCreate(Bundle icicle) {
+        super.onCreate(icicle);
+
+        // Trampoline over to new management UI
+        final Intent intent = new Intent(DocumentsContract.ACTION_MANAGE_ROOT);
+        intent.setData(DocumentsContract.buildRootUri(
+                Constants.STORAGE_AUTHORITY, Constants.STORAGE_ROOT_ID));
+        startActivity(intent);
+        finish();
+    }
+
+    public void onCreateLegacy(Bundle icicle) {
         super.onCreate(icicle);
         setFinishOnTouchOutside(true);
         setupViews();
@@ -431,8 +442,10 @@ public class DownloadList extends Activity {
 
         if (mDateSortedCursor == null || mDateSortedCursor.getCount() == 0) {
             mEmptyView.setVisibility(View.VISIBLE);
+            mSortOption.setVisibility(View.GONE);
         } else {
             mEmptyView.setVisibility(View.GONE);
+            mSortOption.setVisibility(View.VISIBLE);
             ListView lv = activeListView();
             lv.setVisibility(View.VISIBLE);
             lv.invalidateViews(); // ensure checkboxes get updated
@@ -516,11 +529,8 @@ public class DownloadList extends Activity {
         }
 
         final long id = cursor.getLong(cursor.getColumnIndexOrThrow(BaseColumns._ID));
-        final Intent intent = OpenHelper.buildViewIntent(this, id);
-        try {
-            startActivity(intent);
-        } catch (ActivityNotFoundException ex) {
-            Toast.makeText(this, R.string.download_no_application_title, Toast.LENGTH_LONG).show();
+        if (!OpenHelper.startViewIntent(this, id, 0)) {
+            Toast.makeText(this, R.string.download_no_application_title, Toast.LENGTH_SHORT).show();
         }
     }
 

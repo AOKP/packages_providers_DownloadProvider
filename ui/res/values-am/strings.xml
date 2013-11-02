@@ -36,12 +36,12 @@
     <string name="dialog_insufficient_space_on_cache" msgid="6313630206163908994">"ማውረድመጨረስ  አይችልም። በውጪ ማህደረ መረጃ ማከማቻ ላይ በቂ ቦታ የለም።"</string>
     <string name="dialog_cannot_resume" msgid="8664509751358983543">"አውርድ ተስተጓጉሏል። መቀጠል አልተቻለም፡፡"</string>
     <string name="dialog_file_already_exists" msgid="8308563940663449590">"ማውረድ አይችልም። መድረሻ ፋይል አስቀድሞ አለ።"</string>
-    <string name="dialog_media_not_found" msgid="4468088418758018765">"ማውረድ አይችልም። የውጪ ማህደረመረጃ የለም።"</string>
+    <string name="dialog_media_not_found" msgid="4468088418758018765">"ማውረድ አይችልም። የውጪ  ማህደረ መረጃ  የለም።"</string>
     <string name="download_no_application_title" msgid="7024782176657362251">"ፋይል መክፈት አይቻልም"</string>
     <string name="remove_download" msgid="6372920256257247857">"አስወግድ"</string>
     <string name="delete_download" msgid="76629022653866471">"ሰርዝ"</string>
     <string name="keep_queued_download" msgid="5144882786014818569">"ጠብቅ"</string>
-    <string name="cancel_running_download" msgid="5232704030969221112">"ይቅር"</string>
+    <string name="cancel_running_download" msgid="5232704030969221112">"ሰርዝ"</string>
     <string name="retry_download" msgid="7617100787922717912">"እንደገና ሞክር"</string>
     <string name="deselect_all" msgid="6348198946254776764">"ሁሉንም አትምረጥ"</string>
     <string name="select_all" msgid="634074918366265804">"ሁሉንም ምረጥ"</string>

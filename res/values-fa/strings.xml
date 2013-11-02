@@ -38,9 +38,9 @@
     <string name="notification_need_wifi_for_size" msgid="2556172885154833575">"برای این حجم از دانلود به Wi-Fi نیاز است."</string>
     <string name="notification_paused_in_background" msgid="4328508073283591772">"در پس‌زمینه موقتاً متوقف شد."</string>
     <string name="wifi_required_title" msgid="1995971416871498179">"دانلود برای شبکه اپراتور بسیار بزرگ است"</string>
-    <string name="wifi_required_body" msgid="3067694630143784449">"برای تکمیل این دانلود <xliff:g id="SIZE">%s </xliff:g> باید از Wi-Fi استفاده کنید. در اتصال بعدی به شبکه Wi-Fi و برای شروع دانلود، "\n\n"لمس<xliff:g id="QUEUE_TEXT">%s </xliff:g> کنید."</string>
+    <string name="wifi_required_body" msgid="3067694630143784449">"برای تکمیل این دانلود <xliff:g id="SIZE">%s </xliff:g> باید از Wi-Fi استفاده کنید. در اتصال بعدی به شبکه Wi-Fi و برای شروع دانلود، \n\nلمس<xliff:g id="QUEUE_TEXT">%s </xliff:g> کنید."</string>
     <string name="wifi_recommended_title" msgid="7441589306734687400">"برای دانلود در فرصتی دیگر در صف گذاشته شود؟"</string>
-    <string name="wifi_recommended_body" msgid="1314735166699936073">"شروع دانلود <xliff:g id="SIZE">%s </xliff:g> سبب کم شدن طول عمر باتری و/یا استفاده بیش از حد از اتصال داده تلفن همراه می‌شود که بسته به قرارداد ارائه داده شما ممکن است از طرف اپراتور تلفن هزینه‌هایی برای شما در نظر گرفته شود. "\n\n"<xliff:g id="QUEUE_TEXT">%s</xliff:g> را لمس کنید تا در اتصال بعدی به شبکه Wi-Fi، این دانلود شروع شود."</string>
+    <string name="wifi_recommended_body" msgid="1314735166699936073">"شروع دانلود <xliff:g id="SIZE">%s </xliff:g> سبب کم شدن طول عمر باتری و/یا استفاده بیش از حد از اتصال داده تلفن همراه می‌شود که بسته به قرارداد ارائه داده شما ممکن است از طرف اپراتور تلفن هزینه‌هایی برای شما در نظر گرفته شود. \n\n<xliff:g id="QUEUE_TEXT">%s</xliff:g> را لمس کنید تا در اتصال بعدی به شبکه Wi-Fi، این دانلود شروع شود."</string>
     <string name="button_queue_for_wifi" msgid="422576726189179221">"صف"</string>
     <string name="button_cancel_download" msgid="2430166148737975604">"لغو"</string>
     <string name="button_start_now" msgid="792123674007840864">"اکنون شروع"</string>
@@ -55,4 +55,9 @@
   </plurals>
     <string name="download_remaining" msgid="3139295890887972718">"<xliff:g id="DURATION">%s</xliff:g> باقیمانده"</string>
     <string name="download_no_application_title" msgid="7935659741162801699">"فایل باز نمی‌شود"</string>
+    <string name="root_downloads" msgid="4098414876292351487">"دانلودها"</string>
+    <string name="download_queued" msgid="3302638231377947451">"در صف"</string>
+    <string name="download_running" msgid="3925050393361158266">"در حال انجام"</string>
+    <string name="download_error" msgid="5144180777324573236">"ناموفق"</string>
+    <string name="download_running_percent" msgid="4529799113107391817">"در حال انجام، <xliff:g id="NUMBER">%d</xliff:g><xliff:g id="PERCENT">%%</xliff:g>"</string>
 </resources>
