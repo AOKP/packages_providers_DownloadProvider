@@ -35,6 +35,7 @@ import android.os.SystemClock;
 import android.provider.Downloads;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
+import android.text.format.Formatter;
 import android.util.Log;
 import android.util.LongSparseLongArray;
 
@@ -202,6 +203,7 @@ public class DownloadNotifier {
             // Calculate and show progress
             String remainingText = null;
             String percentText = null;
+            String speedText = null;
             if (type == TYPE_ACTIVE) {
                 long current = 0;
                 long total = 0;
@@ -221,6 +223,10 @@ public class DownloadNotifier {
                     percentText = res.getString(R.string.download_percent, percent);
 
                     if (speed > 0) {
+                        // use Formatter interface for determining speed unit
+                        speedText = res.getString(R.string.download_speed,
+                                Formatter.formatFileSize(mContext, speed));
+
                         final long remainingMillis = ((total - current) * 1000) / speed;
                         remainingText = res.getString(R.string.download_remaining,
                                 DateUtils.formatDuration(remainingMillis));
@@ -235,16 +241,25 @@ public class DownloadNotifier {
             // Build titles and description
             final Notification notif;
             if (cluster.size() == 1) {
+                final Notification.InboxStyle inboxStyle = new Notification.InboxStyle(builder);
                 final DownloadInfo info = cluster.iterator().next();
 
                 builder.setContentTitle(getDownloadTitle(res, info));
+                builder.setContentText(remainingText);
 
                 if (type == TYPE_ACTIVE) {
                     if (!TextUtils.isEmpty(info.mDescription)) {
-                        builder.setContentText(info.mDescription);
+                        inboxStyle.addLine(info.mDescription);
                     } else {
-                        builder.setContentText(remainingText);
+                        inboxStyle.addLine(res.getString(R.string.download_running));
                     }
+
+                    if (TextUtils.isEmpty(speedText)) {
+                        inboxStyle.setSummaryText(remainingText);
+                    } else {
+                        inboxStyle.setSummaryText(speedText + ", " + remainingText);
+                    }
+
                     builder.setContentInfo(percentText);
 
                 } else if (type == TYPE_WAITING) {
@@ -253,14 +268,19 @@ public class DownloadNotifier {
 
                 } else if (type == TYPE_COMPLETE) {
                     if (Downloads.Impl.isStatusError(info.mStatus)) {
-                        builder.setContentText(res.getText(R.string.notification_download_failed));
+                        builder.setContentText(
+                                res.getText(R.string.notification_download_failed));
+                        inboxStyle.setSummaryText(
+                                res.getText(R.string.notification_download_failed));
                     } else if (Downloads.Impl.isStatusSuccess(info.mStatus)) {
                         builder.setContentText(
+                                res.getText(R.string.notification_download_complete));
+                        inboxStyle.setSummaryText(
                                 res.getText(R.string.notification_download_complete));
                     }
                 }
 
-                notif = builder.build();
+                notif = inboxStyle.build();
 
             } else {
                 final Notification.InboxStyle inboxStyle = new Notification.InboxStyle(builder);
@@ -274,7 +294,12 @@ public class DownloadNotifier {
                             R.plurals.notif_summary_active, cluster.size(), cluster.size()));
                     builder.setContentText(remainingText);
                     builder.setContentInfo(percentText);
-                    inboxStyle.setSummaryText(remainingText);
+
+                    if (TextUtils.isEmpty(speedText)) {
+                        inboxStyle.setSummaryText(remainingText);
+                    } else {
+                        inboxStyle.setSummaryText(speedText + ", " + remainingText);
+                    }
 
                 } else if (type == TYPE_WAITING) {
                     builder.setContentTitle(res.getQuantityString(
