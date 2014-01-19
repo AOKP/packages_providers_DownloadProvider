@@ -216,6 +216,9 @@
     <!-- Time remaining until download is complete. [CHAR LIMIT=32] -->
     <string name="download_remaining"><xliff:g id="duration" example="3 minutes">%s</xliff:g> left</string>
 
+    <!-- Transfer speed for current download/s. -->
+    <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+
     <!-- Text for a toast appearing when a user clicks on a completed download, informing the user
          that there is no application on the device that can open the file that was downloaded
          [CHAR LIMIT=200] -->
