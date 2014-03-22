@@ -353,7 +353,8 @@ public class DownloadInfo {
         if (!Downloads.Impl.isStatusCompleted(mStatus)) {
             return false;
         }
-        if (mVisibility == Downloads.Impl.VISIBILITY_VISIBLE_NOTIFY_COMPLETED) {
+        if (mVisibility == Downloads.Impl.VISIBILITY_VISIBLE_NOTIFY_COMPLETED ||
+                mVisibility == DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_ONLY_COMPLETION) {
             return true;
         }
         return false;
