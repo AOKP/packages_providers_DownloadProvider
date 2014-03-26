@@ -18,5 +18,5 @@
  */
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/තත්</string>
 </resources>
