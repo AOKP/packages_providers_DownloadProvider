@@ -48,6 +48,10 @@ public class TrampolineActivity extends Activity {
     private static final String KEY_ID = "id";
     private static final String KEY_REASON = "reason";
 
+    static final int WIFI_DOWNLOAD = 0;
+    static final int PAUSE_DOWNLOAD = 1;
+    static final int RESUME_DOWNLOAD = 2;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -77,14 +81,18 @@ public class TrampolineActivity extends Activity {
         Log.d(Constants.TAG, "Found " + id + " with status " + status + ", reason " + reason);
         switch (status) {
             case DownloadManager.STATUS_PENDING:
-            case DownloadManager.STATUS_RUNNING:
                 sendRunningDownloadClickedBroadcast(id);
                 finish();
+                break;
+            case DownloadManager.STATUS_RUNNING:
+                PausedDialogFragment.show(getFragmentManager(), id, PAUSE_DOWNLOAD);
                 break;
 
             case DownloadManager.STATUS_PAUSED:
                 if (reason == DownloadManager.PAUSED_QUEUED_FOR_WIFI) {
-                    PausedDialogFragment.show(getFragmentManager(), id);
+                    PausedDialogFragment.show(getFragmentManager(), id, WIFI_DOWNLOAD);
+                } else if (reason == DownloadManager.PAUSED_BY_MANUAL) {
+                    PausedDialogFragment.show(getFragmentManager(), id, RESUME_DOWNLOAD);
                 } else {
                     sendRunningDownloadClickedBroadcast(id);
                     finish();
@@ -113,10 +121,11 @@ public class TrampolineActivity extends Activity {
     }
 
     public static class PausedDialogFragment extends DialogFragment {
-        public static void show(FragmentManager fm, long id) {
+        public static void show(FragmentManager fm, long id, int reason) {
             final PausedDialogFragment dialog = new PausedDialogFragment();
             final Bundle args = new Bundle();
             args.putLong(KEY_ID, id);
+            args.putInt(KEY_REASON, reason);
             dialog.setArguments(args);
             dialog.show(fm, TAG_PAUSED);
         }
@@ -130,21 +139,56 @@ public class TrampolineActivity extends Activity {
             dm.setAccessAllDownloads(true);
 
             final long id = getArguments().getLong(KEY_ID);
+            final int reason = getArguments().getInt(KEY_REASON);
 
             final AlertDialog.Builder builder = new AlertDialog.Builder(
                     context, AlertDialog.THEME_HOLO_LIGHT);
-            builder.setTitle(R.string.dialog_title_queued_body);
-            builder.setMessage(R.string.dialog_queued_body);
 
-            builder.setPositiveButton(R.string.keep_queued_download, null);
+            switch (reason) {
+                case WIFI_DOWNLOAD:
+                    builder.setTitle(R.string.dialog_title_queued_body);
+                    builder.setMessage(R.string.dialog_queued_body);
+                    builder.setPositiveButton(R.string.keep_queued_download, null);
 
-            builder.setNegativeButton(
-                    R.string.remove_download, new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            dm.remove(id);
-                        }
-                    });
+                    builder.setNegativeButton(
+                        R.string.remove_download, new DialogInterface.OnClickListener() {
+                           @Override
+                           public void onClick(DialogInterface dialog, int which) {
+                               dm.remove(id);
+                           }
+                        });
+                    break;
+                case PAUSE_DOWNLOAD:
+                    builder.setTitle(R.string.dialog_title);
+                    builder.setMessage(R.string.paused_dialog_msg);
+                    builder.setNegativeButton(android.R.string.no, null);
+
+                    builder.setPositiveButton(
+                        android.R.string.yes, new DialogInterface.OnClickListener() {
+                           @Override
+                           public void onClick(DialogInterface dialog, int which) {
+                               dm.pauseDownload(id);
+                           }
+                        });
+                    break;
+                case RESUME_DOWNLOAD:
+                    builder.setTitle(R.string.dialog_title);
+                    builder.setMessage(R.string.resume_dialog_msg);
+                    builder.setNegativeButton(android.R.string.no, null);
+
+                    builder.setPositiveButton(
+                        android.R.string.yes, new DialogInterface.OnClickListener() {
+                           @Override
+                           public void onClick(DialogInterface dialog, int which) {
+                               dm.resumeDownload(id);
+                               Intent intent = new Intent(Constants.ACTION_RESUME);
+                               intent.setClassName(Constants.PROVIDER_PACKAGE_NAME,
+                                    "com.android.providers.downloads.DownloadReceiver");
+                               getActivity().sendBroadcast(intent);
+                           }
+                        });
+                    break;
+            }
 
             return builder.create();
         }
@@ -181,7 +225,6 @@ public class TrampolineActivity extends Activity {
                     context, AlertDialog.THEME_HOLO_LIGHT);
             builder.setTitle(R.string.dialog_title_not_available);
 
-            final String message;
             switch (reason) {
                 case DownloadManager.ERROR_FILE_ALREADY_EXISTS:
                     builder.setMessage(R.string.dialog_file_already_exists);
