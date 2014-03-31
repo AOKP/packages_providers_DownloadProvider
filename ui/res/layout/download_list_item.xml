@@ -82,4 +82,12 @@
         android:textAppearance="?android:attr/textAppearanceSmall"
         android:textAlignment="viewStart" />
 
+    <ProgressBar
+        android:id="@+id/progressbar"
+        android:layout_gravity="fill_horizontal"
+        android:layout_columnSpan="4"
+        android:visibility="gone"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:paddingTop="4dip" />
+
 </com.android.providers.downloads.ui.DownloadItem>

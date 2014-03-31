@@ -23,6 +23,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.CheckBox;
 import android.widget.Checkable;
 import android.widget.GridLayout;
+import android.widget.ProgressBar;
 
 /**
  * This class customizes RelativeLayout to directly handle clicks on the left part of the view and
@@ -35,6 +36,7 @@ public class DownloadItem extends GridLayout implements Checkable {
 
     private boolean mIsInDownEvent = false;
     private CheckBox mCheckBox;
+    private ProgressBar mProgressBar;
     private long mDownloadId;
     private String mFileName;
     private String mMimeType;
@@ -66,6 +68,7 @@ public class DownloadItem extends GridLayout implements Checkable {
     protected void onFinishInflate() {
         super.onFinishInflate();
         mCheckBox = (CheckBox) findViewById(R.id.download_checkbox);
+        mProgressBar = (ProgressBar) findViewById(R.id.progressbar);
     }
 
     public void setData(long downloadId, int position, String fileName, String mimeType) {
@@ -144,6 +147,10 @@ public class DownloadItem extends GridLayout implements Checkable {
 
     public CheckBox getCheckBox() {
         return this.mCheckBox;
+    }
+
+    public ProgressBar getProgressBar() {
+        return this.mProgressBar;
     }
 
     public String getFileName() {
