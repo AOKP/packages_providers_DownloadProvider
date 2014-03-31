@@ -116,5 +116,4 @@
     <!-- title shown when displaying list of apps to choose from when share is clicked on
         [CHAR LIMIT = 20] -->
     <string name="download_share_dialog">Share via</string>
-
 </resources>
