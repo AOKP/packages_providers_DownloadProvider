@@ -19,4 +19,27 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_stop">Zastavit</string>
+  <string name="download_resume">Obnovit</string>
+  <string name="download_pause">Pozastavit</string>
+  <string name="download_retry">Opakovat</string>
+  <string name="download_stop_all">Zastavit vše</string>
+  <string name="download_resume_all">Obnovit vše</string>
+  <string name="download_pause_all">Pozastavit vše</string>
+  <string name="download_retry_all">Opakovat vše</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> sekunda</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> sekundy</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> sekund</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> minuta</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> minuty</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> minut</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> hodina</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> hodiny</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> hodin</item>
+  </plurals>
 </resources>

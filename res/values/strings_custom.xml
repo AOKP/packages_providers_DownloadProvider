@@ -21,5 +21,29 @@
 
 <!-- Transfer speed for current download/s. -->
 <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+    <string name="download_stop">Stop</string>
+    <string name="download_resume">Resume</string>
+    <string name="download_pause">Pause</string>
+    <string name="download_retry">Retry</string>
 
+    <string name="download_stop_all">Stop all</string>
+    <string name="download_resume_all">Resume all</string>
+    <string name="download_pause_all">Pause all</string>
+    <string name="download_retry_all">Retry all</string>
+
+    <!-- Phrase describing a time duration using seconds [CHAR LIMIT=16] -->
+    <plurals name="duration_seconds">
+         <item quantity="one"><xliff:g id="count">%d</xliff:g> sec</item>
+         <item quantity="other"><xliff:g id="count">%d</xliff:g> secs</item>
+    </plurals>
+    <!-- Phrase describing a time duration using minutes [CHAR LIMIT=16] -->
+    <plurals name="duration_minutes">
+         <item quantity="one"><xliff:g id="count">%d</xliff:g> min</item>
+         <item quantity="other"><xliff:g id="count">%d</xliff:g> mins</item>
+    </plurals>
+    <!-- Phrase describing a time duration using hours [CHAR LIMIT=16] -->
+    <plurals name="duration_hours">
+         <item quantity="one"><xliff:g id="count">%d</xliff:g> hr</item>
+         <item quantity="other"><xliff:g id="count">%d</xliff:g> hrs</item>
+    </plurals>
 </resources>
