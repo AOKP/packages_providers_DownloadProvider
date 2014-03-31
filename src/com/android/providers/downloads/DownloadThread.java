@@ -92,6 +92,8 @@ public class DownloadThread implements Runnable {
 
     private volatile boolean mPolicyDirty;
 
+    private final static String QRD_ETAG = "qrd_magic_etag";
+
     public DownloadThread(Context context, SystemFacade systemFacade, DownloadInfo info,
             StorageManager storageManager, DownloadNotifier notifier) {
         mContext = context;
@@ -522,6 +524,10 @@ public class DownloadThread implements Runnable {
             if (mInfo.mStatus == Downloads.Impl.STATUS_CANCELED || mInfo.mDeleted) {
                 throw new StopRequestException(Downloads.Impl.STATUS_CANCELED, "download canceled");
             }
+            if (mInfo.mStatus == Downloads.Impl.STATUS_PAUSED_BY_MANUAL) {
+                // user pauses the download by manual, here send exception and stop the request.
+                throw new StopRequestException(Downloads.Impl.STATUS_PAUSED_BY_MANUAL, "download paused by manual");
+            }
         }
 
         // if policy has been changed, trigger connectivity check
@@ -711,6 +717,10 @@ public class DownloadThread implements Runnable {
 
         state.mHeaderETag = conn.getHeaderField("ETag");
 
+        if (state.mHeaderETag == null) {
+            state.mHeaderETag = QRD_ETAG;
+        }
+
         final String transferEncoding = conn.getHeaderField("Transfer-Encoding");
         if (transferEncoding == null) {
             state.mContentLength = getHeaderFieldLong(conn, "Content-Length", -1);
@@ -831,7 +841,9 @@ public class DownloadThread implements Runnable {
 
         if (state.mContinuingDownload) {
             if (state.mHeaderETag != null) {
-                conn.addRequestProperty("If-Match", state.mHeaderETag);
+                if (!state.mHeaderETag.equals(QRD_ETAG)) {
+                    conn.addRequestProperty("If-Match", state.mHeaderETag);
+                }
             }
             conn.addRequestProperty("Range", "bytes=" + state.mCurrentBytes + "-");
         }

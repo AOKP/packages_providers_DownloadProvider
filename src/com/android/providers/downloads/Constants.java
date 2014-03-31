@@ -60,6 +60,25 @@ public class Constants {
     /** the intent that gets sent when deleting the notification of a completed download */
     public static final String ACTION_HIDE = "android.intent.action.DOWNLOAD_HIDE";
 
+    /** the intent that gets sent when choosing to resume the paused download */
+    public static final String ACTION_RESUME = "android.intent.action.DOWNLOAD_RESUME";
+
+    /** the intent that gets sent when choosing to resume the paused download */
+    public static final String ACTION_NOTIFICATION_RESUME = "android.intent.action.DOWNLOAD_NOTIFICATION_RESUME";
+    public static final String ACTION_NOTIFICATION_RESUME_ALL = "android.intent.action.DOWNLOAD_NOTIFICATION_RESUME_ALL";
+
+    /** the intent that gets sent when choosing to pause the running download */
+    public static final String ACTION_NOTIFICATION_PAUSE = "android.intent.action.DOWNLOAD_NOTIFICATION_PAUSE";
+    public static final String ACTION_NOTIFICATION_PAUSE_ALL = "android.intent.action.DOWNLOAD_NOTIFICATION_PAUSE_ALL";
+
+    /** the intent that gets sent when choosing to stop the running/paused download */
+    public static final String ACTION_NOTIFICATION_STOP = "android.intent.action.DOWNLOAD_NOTIFICATION_STOP";
+    public static final String ACTION_NOTIFICATION_STOP_ALL = "android.intent.action.DOWNLOAD_NOTIFICATION_STOP_ALL";
+
+    /** the intent that gets sent when choosing to retry the failed download */
+    public static final String ACTION_NOTIFICATION_RETRY = "android.intent.action.DOWNLOAD_NOTIFICATION_RETRY";
+    public static final String ACTION_NOTIFICATION_RETRY_ALL = "android.intent.action.DOWNLOAD_NOTIFICATION_RETRY_ALL";
+
     /** The default base name for downloaded files if we can't get one at the HTTP level */
     public static final String DEFAULT_DL_FILENAME = "downloadfile";
 
