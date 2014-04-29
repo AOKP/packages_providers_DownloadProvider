@@ -91,6 +91,8 @@ public class DownloadThread implements Runnable {
     private final DownloadNotifier mNotifier;
 
     private volatile boolean mPolicyDirty;
+    // Continue download when HTTP Server doesn't contain etag in its response.
+    private final static String CUSTOM_ETAG = "custom_etag";
 
     public DownloadThread(Context context, SystemFacade systemFacade, DownloadInfo info,
             StorageManager storageManager, DownloadNotifier notifier) {
@@ -710,6 +712,10 @@ public class DownloadThread implements Runnable {
         }
 
         state.mHeaderETag = conn.getHeaderField("ETag");
+        if (state.mHeaderETag == null) {
+            Log.d(TAG, "Added custom_etag in the HTTP response header");
+            state.mHeaderETag = CUSTOM_ETAG;
+        }
 
         final String transferEncoding = conn.getHeaderField("Transfer-Encoding");
         if (transferEncoding == null) {
@@ -831,7 +837,9 @@ public class DownloadThread implements Runnable {
 
         if (state.mContinuingDownload) {
             if (state.mHeaderETag != null) {
-                conn.addRequestProperty("If-Match", state.mHeaderETag);
+                if (!state.mHeaderETag.equals(CUSTOM_ETAG)) {
+                    conn.addRequestProperty("If-Match", state.mHeaderETag);
+                }
             }
             conn.addRequestProperty("Range", "bytes=" + state.mCurrentBytes + "-");
         }
