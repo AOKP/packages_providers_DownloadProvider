@@ -18,6 +18,7 @@ package com.android.providers.downloads;
 
 import static android.app.DownloadManager.COLUMN_LOCAL_FILENAME;
 import static android.app.DownloadManager.COLUMN_LOCAL_URI;
+import static android.app.DownloadManager.COLUMN_MEDIAPROVIDER_URI;
 import static android.app.DownloadManager.COLUMN_MEDIA_TYPE;
 import static android.app.DownloadManager.COLUMN_URI;
 import static android.provider.Downloads.Impl.ALL_DOWNLOADS_CONTENT_URI;
@@ -88,6 +89,10 @@ public class OpenHelper {
                 intent.putExtra(Intent.EXTRA_ORIGINATING_URI, remoteUri);
                 intent.putExtra(Intent.EXTRA_REFERRER, getRefererUri(context, id));
                 intent.putExtra(Intent.EXTRA_ORIGINATING_UID, getOriginatingUid(context, id));
+            } else if (mimeType.startsWith("image/") && !isNull(cursor, COLUMN_MEDIAPROVIDER_URI)) {
+                final Uri mediaUri = getCursorUri(cursor, COLUMN_MEDIAPROVIDER_URI);
+                intent.setDataAndType(mediaUri, mimeType);
+                intent.putExtra("SingleItemOnly", true);
             } else if ("file".equals(localUri.getScheme())) {
                 intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                         | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -137,6 +142,10 @@ public class OpenHelper {
             }
         }
         return -1;
+    }
+
+    private static Boolean isNull(Cursor cursor, String column) {
+        return cursor.isNull(cursor.getColumnIndexOrThrow(column));
     }
 
     private static String getCursorString(Cursor cursor, String column) {
