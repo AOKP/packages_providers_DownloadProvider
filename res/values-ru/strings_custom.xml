@@ -18,5 +18,28 @@
  */
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/с</string>
+  <string name="download_stop">Стоп</string>
+  <string name="download_resume">Возобновить</string>
+  <string name="download_pause">Пауза</string>
+  <string name="download_retry">Повтор</string>
+  <string name="download_stop_all">Остановить все</string>
+  <string name="download_resume_all">Возобновить все</string>
+  <string name="download_pause_all">Пристановить все</string>
+  <string name="download_retry_all">Повторить все</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> с</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> с</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> с</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> мин.</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> мин.</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> мин.</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> ч</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> ч</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> ч</item>
+  </plurals>
 </resources>

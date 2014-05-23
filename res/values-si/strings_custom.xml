@@ -19,4 +19,24 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/තත්</string>
+  <string name="download_stop">නවත්වන්න</string>
+  <string name="download_resume">යලි අරඹන්න</string>
+  <string name="download_pause">විරාම කරන්න</string>
+  <string name="download_retry">යලි උත්සාහ කරන්න</string>
+  <string name="download_stop_all">සියල්ල නවත්වන්න</string>
+  <string name="download_resume_all">සියල්ල යලි අරඹන්න</string>
+  <string name="download_pause_all">සියල්ල විරාම කරන්න</string>
+  <string name="download_retry_all">සියල්ල යලි උත්සාහ කරන්න</string>
+  <plurals name="duration_seconds">
+    <item quantity="one">තත්පර <xliff:g id="count">%d</xliff:g></item>
+    <item quantity="other">තත්පර <xliff:g id="count">%d</xliff:g></item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one">මිනිත්තු <xliff:g id="count">%d</xliff:g></item>
+    <item quantity="other">මිනිත්තු <xliff:g id="count">%d</xliff:g></item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one">පැය <xliff:g id="count">%d</xliff:g></item>
+    <item quantity="other">පැය <xliff:g id="count">%d</xliff:g></item>
+  </plurals>
 </resources>

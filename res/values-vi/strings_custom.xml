@@ -18,5 +18,22 @@
  */
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/giây</string>
+  <string name="download_stop">Dừng</string>
+  <string name="download_resume">Tiếp tục</string>
+  <string name="download_pause">Tạm dừng</string>
+  <string name="download_retry">Thử lại</string>
+  <string name="download_stop_all">Dừng tất cả</string>
+  <string name="download_resume_all">Tiếp tục tất cả</string>
+  <string name="download_pause_all">Tạm dừng tất cả</string>
+  <string name="download_retry_all">Thử lại tất cả</string>
+  <plurals name="duration_seconds">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> giây</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> phút</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> giờ</item>
+  </plurals>
 </resources>

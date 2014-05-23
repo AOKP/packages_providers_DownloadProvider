@@ -18,5 +18,22 @@
  */
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-  <string name="download_speed">%s</string>
+  <string name="download_speed">%s/秒</string>
+  <string name="download_stop">停止</string>
+  <string name="download_resume">再開</string>
+  <string name="download_pause">一時停止</string>
+  <string name="download_retry">再試行</string>
+  <string name="download_stop_all">全て停止</string>
+  <string name="download_resume_all">全て再開</string>
+  <string name="download_pause_all">全て一時停止</string>
+  <string name="download_retry_all">全て再試行</string>
+  <plurals name="duration_seconds">
+    <item quantity="other">%d 秒</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="other">%d 分</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="other">%d 時間</item>
+  </plurals>
 </resources>

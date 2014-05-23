@@ -19,4 +19,24 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="durée">%s</xliff:g>/s</string>
+  <string name="download_stop">Interrompre</string>
+  <string name="download_resume">Reprendre</string>
+  <string name="download_pause">Pause</string>
+  <string name="download_retry">Réessayer</string>
+  <string name="download_stop_all">Arrêter tous</string>
+  <string name="download_resume_all">Tout reprendre</string>
+  <string name="download_pause_all">Tout mettre en attente</string>
+  <string name="download_retry_all">Tout recommencer</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> sec</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> secs</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> min</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> mins</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> hr</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> hrs</item>
+  </plurals>
 </resources>
