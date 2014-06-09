@@ -19,4 +19,21 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_stop">Durdur</string>
+  <string name="download_resume">Devam et</string>
+  <string name="download_pause">Duraklat</string>
+  <string name="download_retry">Yeniden dene</string>
+  <string name="download_stop_all">Tümünü durdur</string>
+  <string name="download_resume_all">Tümünü sürdür</string>
+  <string name="download_pause_all">Tümünü duraklat</string>
+  <string name="download_retry_all">Tümünü tekrar dene</string>
+  <plurals name="duration_seconds">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> saniye</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> dakika</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> saat</item>
+  </plurals>
 </resources>

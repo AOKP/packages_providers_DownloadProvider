@@ -19,7 +19,7 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="durée">%s</xliff:g>/s</string>
-  <string name="download_stop">Interrompre</string>
+  <string name="download_stop">Arrêter</string>
   <string name="download_resume">Reprendre</string>
   <string name="download_pause">Pause</string>
   <string name="download_retry">Réessayer</string>

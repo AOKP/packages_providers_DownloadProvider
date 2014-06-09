@@ -17,4 +17,22 @@
  * limitations under the License.
  */
 -->
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2"/>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_pause">Pauză</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> secundă</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> secunde</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> secunde</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> minut</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> minute</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> minute</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> oră</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> ore</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> ore</item>
+  </plurals>
+</resources>

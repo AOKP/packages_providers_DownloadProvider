@@ -19,4 +19,12 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_stop">Stoppa</string>
+  <string name="download_resume">Återuppta</string>
+  <string name="download_pause">Pausa</string>
+  <string name="download_retry">Försök igen</string>
+  <string name="download_stop_all">Stoppa alla</string>
+  <string name="download_resume_all">Återuppta alla</string>
+  <string name="download_pause_all">Pausa alla</string>
+  <string name="download_retry_all">Försök igen alla</string>
 </resources>

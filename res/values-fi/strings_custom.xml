@@ -17,4 +17,23 @@
  * limitations under the License.
  */
 -->
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2"/>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="download_stop">Pysäytä</string>
+  <string name="download_resume">Jatka</string>
+  <string name="download_pause">Tauko</string>
+  <string name="download_retry">Yritä uudelleen</string>
+  <string name="download_stop_all">Pysäytä kaikki</string>
+  <string name="download_pause_all">Keskeytä kaikki</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> sekunti</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> sekuntia</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> minuutti</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> minuuttia</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> tunti</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> tuntia</item>
+  </plurals>
+</resources>
