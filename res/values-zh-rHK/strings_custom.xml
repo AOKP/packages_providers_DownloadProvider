@@ -19,4 +19,21 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_stop">停止</string>
+  <string name="download_resume">繼續</string>
+  <string name="download_pause">暫停</string>
+  <string name="download_retry">重試</string>
+  <string name="download_stop_all">所有停止</string>
+  <string name="download_resume_all">所有繼續</string>
+  <string name="download_pause_all">所有暫停</string>
+  <string name="download_retry_all">所有重試</string>
+  <plurals name="duration_seconds">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> 秒</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> 分鐘</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> 小時</item>
+  </plurals>
 </resources>
