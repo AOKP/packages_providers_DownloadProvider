@@ -27,14 +27,4 @@
   <string name="download_resume_all">Wznów wszystkie</string>
   <string name="download_pause_all">Wstrzymaj wszystkie</string>
   <string name="download_retry_all">Wznów wszystkie</string>
-  <plurals name="duration_seconds">
-    <item quantity="one"><xliff:g id="count">%d</xliff:g> sek
-
-<xliff:g id="count">%d</xliff:g> sek</item>
-    <item quantity="few">Singular Form
-<xliff:g id="count">%d</xliff:g> sek
-Plural Form
-<xliff:g id="count">%d</xliff:g> sek</item>
-    <item quantity="other"><xliff:g id="count">%d</xliff:g> sek</item>
-  </plurals>
 </resources>
