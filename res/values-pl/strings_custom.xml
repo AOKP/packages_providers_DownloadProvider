@@ -26,5 +26,20 @@
   <string name="download_stop_all">Zatrzymaj wszystkie</string>
   <string name="download_resume_all">Wznów wszystkie</string>
   <string name="download_pause_all">Wstrzymaj wszystkie</string>
-  <string name="download_retry_all">Wznów wszystkie</string>
+  <string name="download_retry_all">Powtórz wszystkie</string>
+  <plurals name="duration_seconds">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> sekunda</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> sekundy</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> sekund</item>
+  </plurals>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> minuta</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> minuty</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> minut</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> godzina</item>
+    <item quantity="few"><xliff:g id="count">%d</xliff:g> godziny</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> godzin</item>
+  </plurals>
 </resources>
