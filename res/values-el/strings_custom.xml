@@ -19,4 +19,17 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="download_speed"><xliff:g id="duration">%s</xliff:g>/s</string>
+  <string name="download_stop">Διακοπή</string>
+  <string name="download_pause">Παύση</string>
+  <string name="download_retry">Δοκιμάστε ξανά</string>
+  <string name="download_stop_all">Διακοπή όλων</string>
+  <string name="download_pause_all">Παύση όλα</string>
+  <plurals name="duration_minutes">
+    <item quantity="one"><xliff:g id="count"> %d </xliff:g> λεπτά</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> λ</item>
+  </plurals>
+  <plurals name="duration_hours">
+    <item quantity="one"><xliff:g id="count">%d</xliff:g> ω</item>
+    <item quantity="other"><xliff:g id="count">%d</xliff:g> ω</item>
+  </plurals>
 </resources>
