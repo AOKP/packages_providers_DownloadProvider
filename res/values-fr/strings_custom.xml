@@ -23,10 +23,10 @@
   <string name="download_resume">Reprendre</string>
   <string name="download_pause">Pause</string>
   <string name="download_retry">Réessayer</string>
-  <string name="download_stop_all">Arrêter tous</string>
+  <string name="download_stop_all">Arrêter tout</string>
   <string name="download_resume_all">Tout reprendre</string>
-  <string name="download_pause_all">Tout mettre en attente</string>
-  <string name="download_retry_all">Tout recommencer</string>
+  <string name="download_pause_all">Tout mettre en pause</string>
+  <string name="download_retry_all">Tout réessayer</string>
   <plurals name="duration_seconds">
     <item quantity="one"><xliff:g id="count">%d</xliff:g> sec</item>
     <item quantity="other"><xliff:g id="count">%d</xliff:g> secs</item>
