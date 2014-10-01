@@ -23,7 +23,7 @@
   <string name="download_resume">Reprendre</string>
   <string name="download_pause">Pause</string>
   <string name="download_retry">Réessayer</string>
-  <string name="download_stop_all">Arrêter tout</string>
+  <string name="download_stop_all">Tout arrêter</string>
   <string name="download_resume_all">Tout reprendre</string>
   <string name="download_pause_all">Tout mettre en pause</string>
   <string name="download_retry_all">Tout réessayer</string>

@@ -17,4 +17,10 @@
  * limitations under the License.
  */
 -->
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2"/>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="download_pause">일시 정지</string>
+  <string name="download_percent"><xliff:g id="number">%d</xliff:g><xliff:g id="percent">%%</xliff:g></string>
+  <string name="dialog_title">다운로드</string>
+  <string name="paused_dialog_msg">다운로드를 일시 중지 하시겠습니까?</string>
+  <string name="resume_dialog_msg">다운로드를 다시 시작 하시겠습니까?</string>
+</resources>

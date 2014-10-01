@@ -17,4 +17,10 @@
  * limitations under the License.
  */
 -->
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2"/>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+  <string name="download_pause">En pausa</string>
+  <string name="download_percent"><xliff:g id="number">%d</xliff:g><xliff:g id="percent">%%</xliff:g></string>
+  <string name="dialog_title">Descargar</string>
+  <string name="paused_dialog_msg">¿Quieres pausar la descarga?</string>
+  <string name="resume_dialog_msg">¿Quieres volver a descargar?</string>
+</resources>
